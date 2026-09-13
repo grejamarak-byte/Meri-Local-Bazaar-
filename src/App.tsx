@@ -3405,16 +3405,21 @@ export function App() {
           />
         )}
 
-        {/* VIEW 2.5: SHOP, VEHICLE & LOCAL SERVICES REGISTRATION */}
+        {/* VIEW 2.5: SHOP, VEHICLE, DELIVERY & LOCAL SERVICES REGISTRATION */}
         {currentUser && userActiveTab === 'registrations' && (
           <BusinessVehicleRegistrationView
             currentUser={currentUser}
             shopRegistrations={shopRegistrations}
             vehicleRegistrations={vehicleRegistrations}
             serviceRegistrations={serviceRegistrations}
+            wallets={wallets}
+            payoutRequests={payoutRequests}
             onSubmitShop={handleSubmitShop}
             onSubmitVehicle={handleSubmitVehicle}
             onSubmitService={handleSubmitServiceRegistration}
+            onSubmitDeliveryPartner={handleRegisterDeliveryPartner}
+            onRequestPayout={handleRequestPayout}
+            onNavigateToDeliveryDashboard={() => setUserActiveTab('delivery_dashboard')}
           />
         )}
 

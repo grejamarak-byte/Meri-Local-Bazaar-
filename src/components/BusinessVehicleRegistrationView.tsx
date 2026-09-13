@@ -23,13 +23,22 @@ import {
   Briefcase,
   Wrench,
   Award,
+  Bike,
+  Wallet,
+  ArrowRight,
+  Send,
+  X,
+  Copy,
+  Check,
 } from 'lucide-react';
 import {
   ShopRegistration,
   VehicleRegistration,
   ServiceRegistration,
   UserProfile,
-  LocalAddressFields,
+  Wallet as WalletType,
+  PayoutRequest,
+  formatPrice,
 } from '../types';
 import { LocalAddressSelector, LocalAddressState } from './LocalAddressSelector';
 
@@ -38,9 +47,38 @@ interface BusinessVehicleRegistrationViewProps {
   shopRegistrations: ShopRegistration[];
   vehicleRegistrations: VehicleRegistration[];
   serviceRegistrations?: ServiceRegistration[];
+  wallets?: WalletType[];
+  payoutRequests?: PayoutRequest[];
   onSubmitShop: (data: Omit<ShopRegistration, 'id' | 'created_at' | 'status'>) => void;
   onSubmitVehicle: (data: Omit<VehicleRegistration, 'id' | 'created_at' | 'status'>) => void;
   onSubmitService?: (data: Omit<ServiceRegistration, 'id' | 'created_at' | 'status' | 'is_approved'>) => void;
+  onSubmitDeliveryPartner?: (data: {
+    fullName: string;
+    phone: string;
+    vehicleType: 'Bike' | 'Scooty' | 'Auto' | 'Commercial Auto';
+    vehicleNumber: string;
+    state?: string;
+    district?: string;
+    block?: string;
+    village?: string;
+    drivingLicenseNo?: string;
+    drivingLicenseProofUrl?: string;
+    vehicleRcNo?: string;
+    payoutUpiId: string;
+    payoutBankName?: string;
+    payoutAccountNo?: string;
+    payoutIfscCode?: string;
+    payoutQrImageUrl?: string;
+  }) => Promise<void> | void;
+  onRequestPayout?: (data: {
+    amount: number;
+    upi_id: string;
+    bank_name?: string;
+    account_no?: string;
+    ifsc_code?: string;
+    user_role: string;
+  }) => Promise<void> | void;
+  onNavigateToDeliveryDashboard?: () => void;
 }
 
 const SHOP_CATEGORIES = [
@@ -95,14 +133,28 @@ export const BusinessVehicleRegistrationView: React.FC<BusinessVehicleRegistrati
   shopRegistrations,
   vehicleRegistrations,
   serviceRegistrations = [],
+  wallets = [],
+  payoutRequests = [],
   onSubmitShop,
   onSubmitVehicle,
   onSubmitService,
+  onSubmitDeliveryPartner,
+  onRequestPayout,
+  onNavigateToDeliveryDashboard,
 }) => {
-  const [activeTab, setActiveTab] = useState<'shop' | 'vehicle' | 'services_jobs' | 'my_status'>('shop');
+  const [activeTab, setActiveTab] = useState<
+    'shop' | 'vehicle' | 'delivery_boy' | 'services_jobs' | 'my_status'
+  >('shop');
   const [submittedSuccess, setSubmittedSuccess] = useState<string | null>(null);
+  const [showPayoutModal, setShowPayoutModal] = useState(false);
+  const [payoutAmount, setPayoutAmount] = useState('');
+  const [payoutUpi, setPayoutUpi] = useState(currentUser?.payout_upi_id || '');
+  const [payoutBankName, setPayoutBankName] = useState(currentUser?.payout_bank_name || '');
+  const [payoutAccountNo, setPayoutAccountNo] = useState(currentUser?.payout_account_no || '');
+  const [payoutIfsc, setPayoutIfsc] = useState(currentUser?.payout_ifsc_code || '');
+  const [copiedUpi, setCopiedUpi] = useState<string | null>(null);
 
-  // Shop Form State
+  // 1. Shop Form State
   const [shopName, setShopName] = useState('');
   const [shopCategory, setShopCategory] = useState(SHOP_CATEGORIES[0]);
   const [shopIdType, setShopIdType] = useState('Trade License');
@@ -123,15 +175,13 @@ export const BusinessVehicleRegistrationView: React.FC<BusinessVehicleRegistrati
   const [shopBannerUrl, setShopBannerUrl] = useState('');
   const [shopDescription, setShopDescription] = useState('');
   const [openingHours, setOpeningHours] = useState('9:00 AM - 8:00 PM');
-
-  // Shop Payout State
   const [shopPayoutUpi, setShopPayoutUpi] = useState(currentUser?.payout_upi_id || '');
   const [shopBankName, setShopBankName] = useState(currentUser?.payout_bank_name || '');
   const [shopAccountNo, setShopAccountNo] = useState(currentUser?.payout_account_no || '');
   const [shopIfscCode, setShopIfscCode] = useState(currentUser?.payout_ifsc_code || '');
   const [shopQrUrl, setShopQrUrl] = useState(currentUser?.payout_qr_image_url || '');
 
-  // Vehicle Form State
+  // 2. Cab / Taxi Vehicle Form State
   const [driverName, setDriverName] = useState(currentUser?.full_name || '');
   const [driverPhone, setDriverPhone] = useState(currentUser?.phone || '');
   const [driverWhatsapp, setDriverWhatsapp] = useState(currentUser?.phone || '');
@@ -151,15 +201,33 @@ export const BusinessVehicleRegistrationView: React.FC<BusinessVehicleRegistrati
   const [vehiclePhotoUrl, setVehiclePhotoUrl] = useState('');
   const [operationalRoute, setOperationalRoute] = useState('Tura to Guwahati / Local Tura');
   const [dailyRate, setDailyRate] = useState('');
-
-  // Vehicle Payout State
   const [vehPayoutUpi, setVehPayoutUpi] = useState(currentUser?.payout_upi_id || '');
   const [vehBankName, setVehBankName] = useState(currentUser?.payout_bank_name || '');
   const [vehAccountNo, setVehAccountNo] = useState(currentUser?.payout_account_no || '');
   const [vehIfscCode, setVehIfscCode] = useState(currentUser?.payout_ifsc_code || '');
   const [vehQrUrl, setVehQrUrl] = useState(currentUser?.payout_qr_image_url || '');
 
-  // Local Services & Jobs State
+  // 3. Delivery Boy / Rider Form State
+  const [dbFullName, setDbFullName] = useState(currentUser?.full_name || '');
+  const [dbPhone, setDbPhone] = useState(currentUser?.phone || '');
+  const [dbVehicleType, setDbVehicleType] = useState<'Bike' | 'Scooty' | 'Auto' | 'Commercial Auto'>('Bike');
+  const [dbVehicleNumber, setDbVehicleNumber] = useState(currentUser?.vehicle_number || '');
+  const [dbDlNo, setDbDlNo] = useState(currentUser?.driving_license_no || currentUser?.driving_license || '');
+  const [dbDlProofUrl, setDbDlProofUrl] = useState(currentUser?.driving_license_proof_url || '');
+  const [dbRcNo, setDbRcNo] = useState(currentUser?.vehicle_rc_no || '');
+  const [dbLocation, setDbLocation] = useState<LocalAddressState>({
+    state: currentUser?.state || 'Meghalaya',
+    district: currentUser?.district || 'West Garo Hills',
+    block: currentUser?.block || 'Rongram',
+    village: currentUser?.village || '',
+  });
+  const [dbPayoutUpi, setDbPayoutUpi] = useState(currentUser?.payout_upi_id || '');
+  const [dbBankName, setDbBankName] = useState(currentUser?.payout_bank_name || '');
+  const [dbAccountNo, setDbAccountNo] = useState(currentUser?.payout_account_no || '');
+  const [dbIfscCode, setDbIfscCode] = useState(currentUser?.payout_ifsc_code || '');
+  const [dbQrUrl, setDbQrUrl] = useState(currentUser?.payout_qr_image_url || '');
+
+  // 4. Local Services & Jobs State
   const [srvFullName, setSrvFullName] = useState(currentUser?.full_name || '');
   const [srvPhone, setSrvPhone] = useState(currentUser?.phone || '');
   const [srvWhatsapp, setSrvWhatsapp] = useState(currentUser?.phone || '');
@@ -184,19 +252,23 @@ export const BusinessVehicleRegistrationView: React.FC<BusinessVehicleRegistrati
     if (currentUser?.full_name) {
       if (!ownerName) setOwnerName(currentUser.full_name);
       if (!driverName) setDriverName(currentUser.full_name);
+      if (!dbFullName) setDbFullName(currentUser.full_name);
       if (!srvFullName) setSrvFullName(currentUser.full_name);
     }
     if (currentUser?.phone) {
       if (!userPhone) setUserPhone(currentUser.phone);
       if (!driverPhone) setDriverPhone(currentUser.phone);
       if (!driverWhatsapp) setDriverWhatsapp(currentUser.phone);
+      if (!dbPhone) setDbPhone(currentUser.phone);
       if (!srvPhone) setSrvPhone(currentUser.phone);
       if (!srvWhatsapp) setSrvWhatsapp(currentUser.phone);
     }
     if (currentUser?.payout_upi_id) {
       if (!shopPayoutUpi) setShopPayoutUpi(currentUser.payout_upi_id);
       if (!vehPayoutUpi) setVehPayoutUpi(currentUser.payout_upi_id);
+      if (!dbPayoutUpi) setDbPayoutUpi(currentUser.payout_upi_id);
       if (!srvPayoutUpi) setSrvPayoutUpi(currentUser.payout_upi_id);
+      if (!payoutUpi) setPayoutUpi(currentUser.payout_upi_id);
     }
   }, [currentUser]);
 
@@ -209,6 +281,14 @@ export const BusinessVehicleRegistrationView: React.FC<BusinessVehicleRegistrati
   );
   const myServices = serviceRegistrations.filter(
     (s) => s.user_id === currentUser?.id || s.phone === currentUser?.phone
+  );
+  const myDeliveryPartnerActive = currentUser?.is_delivery_partner || false;
+
+  // Active User Wallet Balance
+  const myWallet = wallets.find((w) => w.user_id === currentUser?.id);
+  const myWalletBalance = myWallet ? Number(myWallet.balance) || 0 : (currentUser?.id === 'usr_me1' ? 2300 : 0);
+  const myPayouts = payoutRequests.filter(
+    (p) => p.user_id === currentUser?.id || p.driver_id === currentUser?.id
   );
 
   const handleImageUpload = (
@@ -229,6 +309,7 @@ export const BusinessVehicleRegistrationView: React.FC<BusinessVehicleRegistrati
     }
   };
 
+  // 1. Submit Shop Form
   const handleSubmitShopForm = (e: React.FormEvent) => {
     e.preventDefault();
     if (!shopName.trim() || !shopIdNo.trim() || !ownerIdNo.trim() || !userPhone.trim()) {
@@ -278,6 +359,7 @@ export const BusinessVehicleRegistrationView: React.FC<BusinessVehicleRegistrati
     setTimeout(() => setSubmittedSuccess(null), 5000);
   };
 
+  // 2. Submit Cab & Taxi Form
   const handleSubmitVehicleForm = (e: React.FormEvent) => {
     e.preventDefault();
     if (!vehicleRegNo.trim() || !drivingLicenseNo.trim() || !driverPhone.trim() || !vehicleModel.trim()) {
@@ -320,11 +402,50 @@ export const BusinessVehicleRegistrationView: React.FC<BusinessVehicleRegistrati
       payout_qr_image_url: vehQrUrl || undefined,
     });
 
-    setSubmittedSuccess('Vehicle registration request submitted! Admin will verify license & RC for approval.');
+    setSubmittedSuccess('Cab & Taxi registration request submitted! Admin will verify license & RC for approval.');
     setActiveTab('my_status');
     setTimeout(() => setSubmittedSuccess(null), 5000);
   };
 
+  // 3. Submit Delivery Boy / Rider Form
+  const handleSubmitDeliveryBoyForm = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!dbFullName.trim() || !dbPhone.trim() || !dbVehicleNumber.trim()) {
+      alert('Please fill in Full Name, Phone, and Vehicle Number (Bike/Scooty/Auto).');
+      return;
+    }
+    if (!dbPayoutUpi.trim() || !dbPayoutUpi.includes('@')) {
+      alert('Please enter a valid Payout UPI ID (e.g. rider@oksbi) to receive delivery payouts.');
+      return;
+    }
+
+    if (onSubmitDeliveryPartner) {
+      await onSubmitDeliveryPartner({
+        fullName: dbFullName.trim(),
+        phone: dbPhone.trim(),
+        vehicleType: dbVehicleType,
+        vehicleNumber: dbVehicleNumber.trim().toUpperCase(),
+        state: dbLocation.state,
+        district: dbLocation.district,
+        block: dbLocation.block,
+        village: dbLocation.village,
+        drivingLicenseNo: dbDlNo.trim().toUpperCase() || undefined,
+        drivingLicenseProofUrl: dbDlProofUrl || undefined,
+        vehicleRcNo: dbRcNo.trim().toUpperCase() || undefined,
+        payoutUpiId: dbPayoutUpi.trim(),
+        payoutBankName: dbBankName.trim() || undefined,
+        payoutAccountNo: dbAccountNo.trim() || undefined,
+        payoutIfscCode: dbIfscCode.trim().toUpperCase() || undefined,
+        payoutQrImageUrl: dbQrUrl || undefined,
+      });
+    }
+
+    setSubmittedSuccess('Delivery Partner registration submitted successfully! Admin will verify and activate your rider dashboard.');
+    setActiveTab('my_status');
+    setTimeout(() => setSubmittedSuccess(null), 5000);
+  };
+
+  // 4. Submit Local Services & Skilled Jobs Form
   const handleSubmitServiceForm = (e: React.FormEvent) => {
     e.preventDefault();
     if (!srvFullName.trim() || !srvPhone.trim() || !srvCategory.trim()) {
@@ -361,6 +482,40 @@ export const BusinessVehicleRegistrationView: React.FC<BusinessVehicleRegistrati
     setTimeout(() => setSubmittedSuccess(null), 5000);
   };
 
+  // Handle Request Payout Submission
+  const handlePayoutSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    const amountNum = parseFloat(payoutAmount);
+    if (!amountNum || amountNum <= 0) {
+      alert('Please enter a valid withdrawal amount.');
+      return;
+    }
+    if (amountNum > myWalletBalance) {
+      alert(`Withdrawal amount cannot exceed your available balance of ₹${formatPrice(myWalletBalance)}`);
+      return;
+    }
+    if (!payoutUpi.trim() || !payoutUpi.includes('@')) {
+      alert('Please enter a valid Payout UPI ID.');
+      return;
+    }
+
+    if (onRequestPayout) {
+      await onRequestPayout({
+        amount: amountNum,
+        upi_id: payoutUpi.trim(),
+        bank_name: payoutBankName.trim() || undefined,
+        account_no: payoutAccountNo.trim() || undefined,
+        ifsc_code: payoutIfsc.trim().toUpperCase() || undefined,
+        user_role: currentUser?.role || 'Partner',
+      });
+    }
+
+    setShowPayoutModal(false);
+    setPayoutAmount('');
+    setSubmittedSuccess(`Withdrawal request of ₹${formatPrice(amountNum)} submitted to Admin!`);
+    setTimeout(() => setSubmittedSuccess(null), 5000);
+  };
+
   return (
     <div className="space-y-6 max-w-5xl mx-auto pb-12">
       {/* Header Banner */}
@@ -368,123 +523,97 @@ export const BusinessVehicleRegistrationView: React.FC<BusinessVehicleRegistrati
         <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
           <div>
             <div className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-emerald-500/20 text-emerald-400 text-xs font-bold mb-3 border border-emerald-500/30">
-              <ShieldCheck className="w-4 h-4" /> Official Business & Fleet Verification
+              <ShieldCheck className="w-4 h-4" /> Official Business & Fleet Verification Portal
             </div>
             <h1 className="text-2xl sm:text-3xl font-black tracking-tight text-white">
-              Shop & Vehicle Registration Portal
+              Partner Registration & Verification
             </h1>
             <p className="text-slate-300 text-xs sm:text-sm mt-1.5 max-w-2xl leading-relaxed">
-              Register your local shop, taxi, cab, tempo traveler, or auto rickshaw with verified ID proof and driving license. Get a verified blue badge on Meri Local Bazaar!
+              Register your local shop, taxi, cab, tempo traveler, delivery bike fleet, or skilled services. Instant verification and direct UPI payouts!
             </p>
           </div>
 
-          <div className="flex flex-wrap items-center gap-2 bg-slate-800/80 p-2 rounded-2xl border border-slate-700/60 self-start md:self-center">
+          {/* Quick Tab Selector */}
+          <div className="flex flex-wrap items-center gap-1.5 bg-slate-800/90 p-1.5 rounded-2xl border border-slate-700/60 self-start md:self-center">
             <button
               onClick={() => setActiveTab('shop')}
-              className={`px-3.5 py-2 rounded-xl text-xs font-bold transition flex items-center gap-1.5 ${
+              className={`px-3 py-2 rounded-xl text-xs font-bold transition flex items-center gap-1.5 ${
                 activeTab === 'shop'
                   ? 'bg-orange-600 text-white shadow-sm'
                   : 'text-slate-300 hover:text-white'
               }`}
             >
-              <Store className="w-4 h-4" /> Register Shop
+              <Store className="w-4 h-4" /> 1. Shop / Seller
             </button>
             <button
               onClick={() => setActiveTab('vehicle')}
-              className={`px-3.5 py-2 rounded-xl text-xs font-bold transition flex items-center gap-1.5 ${
+              className={`px-3 py-2 rounded-xl text-xs font-bold transition flex items-center gap-1.5 ${
                 activeTab === 'vehicle'
                   ? 'bg-blue-600 text-white shadow-sm'
                   : 'text-slate-300 hover:text-white'
               }`}
             >
-              <Car className="w-4 h-4" /> Register Vehicle
+              <Car className="w-4 h-4" /> 2. Cab & Taxi
+            </button>
+            <button
+              onClick={() => setActiveTab('delivery_boy')}
+              className={`px-3 py-2 rounded-xl text-xs font-bold transition flex items-center gap-1.5 ${
+                activeTab === 'delivery_boy'
+                  ? 'bg-emerald-600 text-white shadow-sm'
+                  : 'text-slate-300 hover:text-white'
+              }`}
+            >
+              <Bike className="w-4 h-4" /> 3. Delivery Boy
             </button>
             <button
               onClick={() => setActiveTab('services_jobs')}
-              className={`px-3.5 py-2 rounded-xl text-xs font-bold transition flex items-center gap-1.5 ${
+              className={`px-3 py-2 rounded-xl text-xs font-bold transition flex items-center gap-1.5 ${
                 activeTab === 'services_jobs'
                   ? 'bg-purple-600 text-white shadow-sm'
                   : 'text-slate-300 hover:text-white'
               }`}
             >
-              <Briefcase className="w-4 h-4" /> Local Services & Jobs Reg
+              <Briefcase className="w-4 h-4" /> 4. Local Services & Jobs
             </button>
             <button
               onClick={() => setActiveTab('my_status')}
-              className={`px-3.5 py-2 rounded-xl text-xs font-bold transition flex items-center gap-1.5 ${
+              className={`px-3 py-2 rounded-xl text-xs font-bold transition flex items-center gap-1.5 ${
                 activeTab === 'my_status'
-                  ? 'bg-emerald-600 text-white shadow-sm'
+                  ? 'bg-amber-600 text-white shadow-sm'
                   : 'text-slate-300 hover:text-white'
               }`}
             >
-              <FileCheck className="w-4 h-4" /> My Submissions ({myShops.length + myVehicles.length + myServices.length})
+              <FileCheck className="w-4 h-4" /> 5. Status & Wallet
             </button>
           </div>
         </div>
       </div>
 
-      {/* DYNAMIC SECURITY & COMMISSION BANNER BASED ON ACTIVE SCREEN TAB */}
-      {activeTab !== 'my_status' && (
-        <div
-          id="registration_dynamic_banner"
-          className={`border rounded-3xl p-5 sm:p-6 shadow-xl flex items-start gap-4 text-white transition-all duration-300 ${
-            activeTab === 'vehicle'
-              ? 'bg-gradient-to-r from-red-600 via-rose-600 to-red-700 border-red-400/60 shadow-red-950/20'
-              : activeTab === 'services_jobs'
-              ? 'bg-gradient-to-r from-red-600 via-rose-600 to-red-700 border-red-400/60 shadow-red-950/20'
-              : 'bg-gradient-to-r from-red-600 via-rose-600 to-red-700 border-red-400/60 shadow-red-950/20'
-          }`}
-        >
-          <div className="w-10 h-10 rounded-2xl bg-white/20 text-white border border-white/30 flex items-center justify-center shrink-0 shadow-xs">
-            <ShieldCheck className="w-6 h-6 text-white" />
-          </div>
-          <div className="space-y-1.5 flex-1 min-w-0">
-            <div className="flex items-center gap-2 flex-wrap">
-              <h3 className="text-sm sm:text-base font-black text-white tracking-tight" style={{ color: '#FFFFFF' }}>
-                {activeTab === 'vehicle'
-                  ? 'Cab, Taxi & Fleet Policy • 0% Commission'
-                  : activeTab === 'services_jobs'
-                  ? 'Local Services Policy • 0% Commission'
-                  : '100% Prepaid Protocol Security Alert'}
-              </h3>
-              <span className="bg-white text-red-950 text-[10px] font-black px-2.5 py-0.5 rounded-full uppercase tracking-wider shadow-xs">
-                {activeTab === 'vehicle'
-                  ? '100% Driver Fare'
-                  : activeTab === 'services_jobs'
-                  ? '100% Direct Pay'
-                  : 'No Cash On Delivery'}
-              </span>
-            </div>
-            <p className="text-xs sm:text-sm font-semibold text-white leading-relaxed" style={{ color: '#FFFFFF' }}>
-              {activeTab === 'vehicle' &&
-                'Apna KM khud check karein aur bhada customer se tay karein. Ride khatam hone par direct Cash ya apne UPI par paisa lelein. Pura paisa 100% driver ka hai! App koi commission nahi lega.'}
-              {activeTab === 'shop' &&
-                'Yeh ek 100% Prepaid App hai. Customer se delivery ke waqt koi bhi cash ya alag se paisa nahi lena hai. Aapka shop order complete hote hi aapka payment aapke app wallet / UPI payout mein aa jayega.'}
-              {activeTab === 'services_jobs' &&
-                'Aap apna visiting charge aur kaam ka paisa khud customer se baat karke tay karenge. Kaam poora hone par customer se direct Cash ya apne personal UPI ID (QR Code) par paisa lelein. Pura paisa 100% aapka hai! App koi commission nahi lega.'}
-            </p>
-          </div>
-        </div>
-      )}
-
-      {/* Toast alert */}
+      {/* Success Notification Alert */}
       {submittedSuccess && (
-        <div className="p-4 bg-emerald-50 border border-emerald-200 text-emerald-800 rounded-2xl text-xs font-bold flex items-center gap-2 animate-in fade-in">
-          <CheckCircle2 className="w-4 h-4 text-emerald-600 shrink-0" />
-          <span>{submittedSuccess}</span>
+        <div className="bg-emerald-50 border border-emerald-300 text-emerald-900 px-5 py-3.5 rounded-2xl text-xs font-bold flex items-center justify-between shadow-sm animate-in fade-in">
+          <div className="flex items-center gap-2.5">
+            <CheckCircle2 className="w-5 h-5 text-emerald-600 shrink-0" />
+            <span>{submittedSuccess}</span>
+          </div>
+          <button onClick={() => setSubmittedSuccess(null)} className="text-emerald-700 hover:text-emerald-900">
+            <X className="w-4 h-4" />
+          </button>
         </div>
       )}
 
-      {/* TAB 1: SHOP REGISTRATION FORM */}
+      {/* ========================================================================= */}
+      {/* TAB 1: SHOP / SELLER REGISTRATION */}
+      {/* ========================================================================= */}
       {activeTab === 'shop' && (
         <div className="bg-white rounded-3xl border border-slate-200 p-6 sm:p-8 shadow-sm space-y-6">
           <div className="border-b border-slate-100 pb-4">
-            <h2 className="text-xl font-black text-slate-900 flex items-center gap-2">
+            <h2 className="text-lg font-black text-slate-900 flex items-center gap-2">
               <Store className="w-5 h-5 text-orange-600" />
-              Register Your Local Business / Retail Store
+              1. Local Shop & Seller Registration Form
             </h2>
             <p className="text-xs text-slate-500 mt-1">
-              Submit your Trade License or GST document along with owner identity proof for admin verification.
+              Verify your physical shop or business in Meghalaya to get a verified badge and sell online.
             </p>
           </div>
 
@@ -498,10 +627,10 @@ export const BusinessVehicleRegistrationView: React.FC<BusinessVehicleRegistrati
                 <input
                   type="text"
                   required
-                  placeholder="e.g. Garo Hills Organic Hub & Spices"
+                  placeholder="e.g. Sangma Grocery & Supermarket"
                   value={shopName}
                   onChange={(e) => setShopName(e.target.value)}
-                  className="w-full px-4 py-2.5 bg-white border border-slate-300 rounded-xl text-sm font-bold text-slate-900 placeholder:text-slate-400 placeholder:font-normal focus:outline-none focus:border-orange-500 focus:ring-2 focus:ring-orange-500/20"
+                  className="w-full px-4 py-2.5 bg-white border border-slate-300 rounded-xl text-sm font-bold text-slate-900 focus:outline-none focus:border-orange-500 focus:ring-2 focus:ring-orange-500/20"
                 />
               </div>
 
@@ -515,115 +644,103 @@ export const BusinessVehicleRegistrationView: React.FC<BusinessVehicleRegistrati
                   onChange={(e) => setShopCategory(e.target.value)}
                   className="w-full px-4 py-2.5 bg-white border border-slate-300 rounded-xl text-sm font-bold text-slate-900 focus:outline-none focus:border-orange-500 focus:ring-2 focus:ring-orange-500/20"
                 >
-                  {SHOP_CATEGORIES.map((cat) => (
-                    <option key={cat} value={cat} className="text-slate-900 font-semibold">
-                      {cat}
+                  {SHOP_CATEGORIES.map((c) => (
+                    <option key={c} value={c}>
+                      {c}
                     </option>
                   ))}
                 </select>
               </div>
 
-              {/* Shop ID Proof Type */}
+              {/* Shop ID Proof Type & Number */}
               <div>
                 <label className="block text-xs font-bold text-slate-800 uppercase tracking-wider mb-1.5">
-                  Business Registration Document Type *
+                  Shop ID Type *
                 </label>
                 <select
                   value={shopIdType}
                   onChange={(e) => setShopIdType(e.target.value)}
                   className="w-full px-4 py-2.5 bg-white border border-slate-300 rounded-xl text-sm font-bold text-slate-900 focus:outline-none focus:border-orange-500 focus:ring-2 focus:ring-orange-500/20"
                 >
-                  <option value="Trade License" className="text-slate-900">Trade License (Municipal / Town Council)</option>
-                  <option value="GSTIN" className="text-slate-900">GST Registration Certificate (GSTIN)</option>
-                  <option value="Local Council Reg" className="text-slate-900">Autonomous District Council (GHADC) Reg</option>
-                  <option value="Shop Act / Other" className="text-slate-900">Shops & Commercial Establishment Act</option>
+                  <option value="Trade License">Trade License (Municipal / District)</option>
+                  <option value="GSTIN Registration">GSTIN Registration</option>
+                  <option value="Shop & Establishment Act">Shop & Establishment Act</option>
+                  <option value="FSSAI Food License">FSSAI Food License</option>
+                  <option value="Udyam / MSME Certificate">Udyam / MSME Certificate</option>
                 </select>
               </div>
 
-              {/* Shop ID Number */}
               <div>
                 <label className="block text-xs font-bold text-slate-800 uppercase tracking-wider mb-1.5">
-                  Business License / Reg Number *
+                  Shop License / Reg Number *
                 </label>
                 <input
                   type="text"
                   required
-                  placeholder="e.g. TL-TURA-2024-8841 or 17AAACM1234F1Z9"
+                  placeholder="e.g. TR-2024-88492"
                   value={shopIdNo}
                   onChange={(e) => setShopIdNo(e.target.value)}
-                  className="w-full px-4 py-2.5 bg-white border border-slate-300 rounded-xl text-sm font-mono font-bold text-slate-900 placeholder:text-slate-400 placeholder:font-normal uppercase focus:outline-none focus:border-orange-500 focus:ring-2 focus:ring-orange-500/20"
+                  className="w-full px-4 py-2.5 bg-white border border-slate-300 rounded-xl text-sm font-mono font-bold text-slate-900 focus:outline-none focus:border-orange-500 focus:ring-2 focus:ring-orange-500/20"
                 />
               </div>
 
-              {/* Owner Name */}
+              {/* Owner Name & Phone */}
               <div>
                 <label className="block text-xs font-bold text-slate-800 uppercase tracking-wider mb-1.5">
-                  Shop Owner Legal Name *
+                  Shop Owner Full Name *
                 </label>
                 <input
                   type="text"
                   required
-                  placeholder="e.g. Silgrak Marak"
+                  placeholder="e.g. Silgrik M. Sangma"
                   value={ownerName}
                   onChange={(e) => setOwnerName(e.target.value)}
-                  className="w-full px-4 py-2.5 bg-white border border-slate-300 rounded-xl text-sm font-bold text-slate-900 placeholder:text-slate-400 placeholder:font-normal focus:outline-none focus:border-orange-500 focus:ring-2 focus:ring-orange-500/20"
+                  className="w-full px-4 py-2.5 bg-white border border-slate-300 rounded-xl text-sm font-bold text-slate-900 focus:outline-none focus:border-orange-500 focus:ring-2 focus:ring-orange-500/20"
                 />
               </div>
 
-              {/* Owner ID Type & Number */}
               <div>
                 <label className="block text-xs font-bold text-slate-800 uppercase tracking-wider mb-1.5">
-                  Owner Identity Proof (Aadhaar / Voter / PAN) *
-                </label>
-                <div className="flex gap-2">
-                  <select
-                    value={ownerIdType}
-                    onChange={(e) => setOwnerIdType(e.target.value)}
-                    className="w-1/3 px-3 py-2.5 bg-white border border-slate-300 rounded-xl text-xs font-bold text-slate-900 focus:outline-none focus:border-orange-500"
-                  >
-                    <option value="Aadhaar Card" className="text-slate-900">Aadhaar</option>
-                    <option value="Voter ID" className="text-slate-900">Voter ID</option>
-                    <option value="PAN Card" className="text-slate-900">PAN Card</option>
-                    <option value="Passport" className="text-slate-900">Passport</option>
-                  </select>
-                  <input
-                    type="text"
-                    required
-                    placeholder="e.g. 9823 4512 7789"
-                    value={ownerIdNo}
-                    onChange={(e) => setOwnerIdNo(e.target.value)}
-                    className="flex-1 px-4 py-2.5 bg-white border border-slate-300 rounded-xl text-sm font-mono font-bold text-slate-900 placeholder:text-slate-400 placeholder:font-normal focus:outline-none focus:border-orange-500"
-                  />
-                </div>
-              </div>
-
-              {/* Contact Phone */}
-              <div>
-                <label className="block text-xs font-bold text-slate-800 uppercase tracking-wider mb-1.5">
-                  Business WhatsApp / Contact Phone *
+                  Owner Phone Number *
                 </label>
                 <input
                   type="tel"
                   required
-                  placeholder="e.g. 9876543210"
+                  placeholder="e.g. 9862012345"
                   value={userPhone}
                   onChange={(e) => setUserPhone(e.target.value)}
-                  className="w-full px-4 py-2.5 bg-white border border-slate-300 rounded-xl text-sm font-bold text-slate-900 placeholder:text-slate-400 placeholder:font-normal focus:outline-none focus:border-orange-500 focus:ring-2 focus:ring-orange-500/20"
+                  className="w-full px-4 py-2.5 bg-white border border-slate-300 rounded-xl text-sm font-mono font-bold text-slate-900 focus:outline-none focus:border-orange-500 focus:ring-2 focus:ring-orange-500/20"
                 />
               </div>
 
-              {/* City / Locality */}
+              {/* Owner Personal ID */}
               <div>
                 <label className="block text-xs font-bold text-slate-800 uppercase tracking-wider mb-1.5">
-                  Market / Town Center *
+                  Owner ID Type *
+                </label>
+                <select
+                  value={ownerIdType}
+                  onChange={(e) => setOwnerIdType(e.target.value)}
+                  className="w-full px-4 py-2.5 bg-white border border-slate-300 rounded-xl text-sm font-bold text-slate-900 focus:outline-none focus:border-orange-500 focus:ring-2 focus:ring-orange-500/20"
+                >
+                  <option value="Aadhaar Card">Aadhaar Card</option>
+                  <option value="Voter ID Card">Voter ID Card</option>
+                  <option value="PAN Card">PAN Card</option>
+                  <option value="Driving License">Driving License</option>
+                </select>
+              </div>
+
+              <div>
+                <label className="block text-xs font-bold text-slate-800 uppercase tracking-wider mb-1.5">
+                  Owner ID Number *
                 </label>
                 <input
                   type="text"
                   required
-                  placeholder="e.g. Tura Supermarket Complex, Hawakhana"
-                  value={cityLocality}
-                  onChange={(e) => setCityLocality(e.target.value)}
-                  className="w-full px-4 py-2.5 bg-white border border-slate-300 rounded-xl text-sm font-bold text-slate-900 placeholder:text-slate-400 placeholder:font-normal focus:outline-none focus:border-orange-500 focus:ring-2 focus:ring-orange-500/20"
+                  placeholder="e.g. 8492 1029 3847"
+                  value={ownerIdNo}
+                  onChange={(e) => setOwnerIdNo(e.target.value)}
+                  className="w-full px-4 py-2.5 bg-white border border-slate-300 rounded-xl text-sm font-mono font-bold text-slate-900 focus:outline-none focus:border-orange-500 focus:ring-2 focus:ring-orange-500/20"
                 />
               </div>
             </div>
@@ -644,186 +761,105 @@ export const BusinessVehicleRegistrationView: React.FC<BusinessVehicleRegistrati
               />
             </div>
 
-            {/* Shop Address */}
+            {/* Shop Address Details */}
             <div>
               <label className="block text-xs font-bold text-slate-800 uppercase tracking-wider mb-1.5">
-                Full Physical Address / Building / Street of Shop *
+                Shop Detailed Address / Landmark *
               </label>
-              <textarea
-                rows={2}
+              <input
+                type="text"
                 required
-                placeholder="Shop No., Complex / Building Name, Street, Landmark"
+                placeholder="e.g. Main Super Market, Ringrey Road, Near SBI Branch"
                 value={shopAddress}
                 onChange={(e) => setShopAddress(e.target.value)}
-                className="w-full px-4 py-2.5 bg-white border border-slate-300 rounded-xl text-sm text-slate-900 placeholder:text-slate-400 focus:outline-none focus:border-orange-500 focus:ring-2 focus:ring-orange-500/20"
+                className="w-full px-4 py-2.5 bg-white border border-slate-300 rounded-xl text-sm font-bold text-slate-900 focus:outline-none focus:border-orange-500 focus:ring-2 focus:ring-orange-500/20"
               />
             </div>
 
-            {/* PART 2: SHOP PAYOUT DETAILS */}
-            <div className="bg-orange-50/60 border-2 border-orange-200 rounded-3xl p-5 sm:p-6 space-y-4">
-              <div className="flex items-center gap-2 border-b border-orange-200 pb-2">
-                <CreditCard className="w-5 h-5 text-orange-600 shrink-0" />
-                <div>
-                  <h3 className="text-sm font-black text-orange-950">
-                    Shop Payout & Settlement Account (Paisa Pane Ka Account) *
-                  </h3>
-                  <p className="text-[11px] text-orange-800">
-                    Online marketplace customer orders ka settlement is UPI / Bank mein transfer hoga.
-                  </p>
-                </div>
-              </div>
-
-              <div>
-                <label className="block text-xs font-bold text-slate-800 uppercase mb-1.5 flex items-center gap-1.5">
-                  <QrCode className="w-3.5 h-3.5 text-orange-600" /> Shop Payout UPI ID * (Mandatory)
-                </label>
-                <input
-                  type="text"
-                  required
-                  placeholder="e.g. garoshop@oksbi or 9876543210@paytm"
-                  value={shopPayoutUpi}
-                  onChange={(e) => setShopPayoutUpi(e.target.value)}
-                  className="w-full px-4 py-2.5 bg-white border border-slate-300 rounded-xl text-sm font-mono font-bold text-slate-900 placeholder:text-slate-400 placeholder:font-normal focus:outline-none focus:border-orange-500"
-                />
-              </div>
-
+            {/* Settlement UPI ID */}
+            <div className="p-4 bg-orange-50/60 border border-orange-200 rounded-2xl space-y-3">
+              <h3 className="text-xs font-extrabold text-orange-950 uppercase tracking-wider flex items-center gap-1.5">
+                <QrCode className="w-4 h-4 text-orange-600" /> Shop Payout & Settlement UPI ID *
+              </h3>
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                 <div>
-                  <label className="block text-[11px] font-bold text-slate-800 uppercase mb-1">
-                    Bank Name
+                  <label className="block text-[11px] font-bold text-slate-700 mb-1">
+                    Payout UPI ID (Instant Bank Settlement) *
+                  </label>
+                  <input
+                    type="text"
+                    required
+                    placeholder="e.g. myshop@oksbi"
+                    value={shopPayoutUpi}
+                    onChange={(e) => setShopPayoutUpi(e.target.value)}
+                    className="w-full px-4 py-2.5 bg-white border border-slate-300 rounded-xl text-sm font-mono font-bold text-slate-900 focus:outline-none focus:border-orange-500"
+                  />
+                </div>
+                <div>
+                  <label className="block text-[11px] font-bold text-slate-700 mb-1">
+                    Bank Name (Optional)
                   </label>
                   <input
                     type="text"
                     placeholder="e.g. State Bank of India"
                     value={shopBankName}
                     onChange={(e) => setShopBankName(e.target.value)}
-                    className="w-full px-3.5 py-2 bg-white border border-slate-300 rounded-xl text-xs font-bold text-slate-900 placeholder:text-slate-400 focus:outline-none focus:border-orange-500"
-                  />
-                </div>
-
-                <div>
-                  <label className="block text-[11px] font-bold text-slate-800 uppercase mb-1">
-                    Account Number
-                  </label>
-                  <input
-                    type="text"
-                    placeholder="e.g. 30219845123"
-                    value={shopAccountNo}
-                    onChange={(e) => setShopAccountNo(e.target.value)}
-                    className="w-full px-3.5 py-2 bg-white border border-slate-300 rounded-xl text-xs font-mono font-bold text-slate-900 placeholder:text-slate-400 focus:outline-none focus:border-orange-500"
-                  />
-                </div>
-
-                <div className="sm:col-span-2">
-                  <label className="block text-[11px] font-bold text-slate-800 uppercase mb-1">
-                    IFSC Code
-                  </label>
-                  <input
-                    type="text"
-                    placeholder="e.g. SBIN0000198"
-                    value={shopIfscCode}
-                    onChange={(e) => setShopIfscCode(e.target.value)}
-                    className="w-full px-3.5 py-2 bg-white border border-slate-300 rounded-xl text-xs font-mono font-bold uppercase text-slate-900 placeholder:text-slate-400 focus:outline-none focus:border-orange-500"
+                    className="w-full px-4 py-2.5 bg-white border border-slate-300 rounded-xl text-sm text-slate-900 focus:outline-none focus:border-orange-500"
                   />
                 </div>
               </div>
+            </div>
 
-              {/* QR Upload */}
-              <div className="p-3 bg-white border border-slate-200 rounded-2xl space-y-2">
+            {/* ID Proof Upload */}
+            <div className="p-4 bg-slate-50 border border-slate-200 rounded-2xl space-y-3">
+              <div className="flex items-center justify-between">
                 <span className="text-xs font-bold text-slate-800 flex items-center gap-1.5">
-                  <Upload className="w-3.5 h-3.5 text-orange-600" /> Shop QR Code Image (Optional)
+                  <FileText className="w-4 h-4 text-orange-600" /> Trade License / Owner ID Photo *
                 </span>
-                <input
-                  type="file"
-                  accept="image/*"
-                  onChange={(e) => handleImageUpload(e, setShopQrUrl)}
-                  className="block w-full text-xs text-slate-500 file:mr-3 file:py-1.5 file:px-3 file:rounded-xl file:border-0 file:text-xs file:font-semibold file:bg-orange-100 file:text-orange-800"
-                />
-                {shopQrUrl && (
-                  <img
-                    src={shopQrUrl}
-                    alt="Shop QR Preview"
-                    className="w-20 h-20 object-contain rounded-xl border border-slate-200 bg-white p-1"
-                  />
-                )}
-              </div>
-            </div>
-
-            {/* Document Upload */}
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-5 pt-2">
-              <div className="p-4 bg-slate-50 border border-slate-200 rounded-2xl space-y-3">
-                <div className="flex items-center justify-between">
-                  <span className="text-xs font-bold text-slate-800 flex items-center gap-1.5">
-                    <FileText className="w-4 h-4 text-orange-600" /> Trade License / GST Doc Photo
-                  </span>
-                  {ownerIdProofUrl && (
-                    <span className="text-[10px] text-emerald-600 font-bold">Uploaded ✓</span>
-                  )}
-                </div>
-                <input
-                  type="file"
-                  accept="image/*"
-                  onChange={(e) => handleImageUpload(e, setOwnerIdProofUrl)}
-                  className="block w-full text-xs text-slate-500 file:mr-3 file:py-1.5 file:px-3 file:rounded-xl file:border-0 file:text-xs file:font-semibold file:bg-orange-100 file:text-orange-700 hover:file:bg-orange-200"
-                />
                 {ownerIdProofUrl && (
-                  <img
-                    src={ownerIdProofUrl}
-                    alt="Doc Preview"
-                    className="w-full h-28 object-cover rounded-xl border border-slate-200"
-                  />
+                  <span className="text-[10px] text-emerald-600 font-bold">Uploaded ✓</span>
                 )}
               </div>
-
-              <div className="p-4 bg-slate-50 border border-slate-200 rounded-2xl space-y-3">
-                <div className="flex items-center justify-between">
-                  <span className="text-xs font-bold text-slate-800 flex items-center gap-1.5">
-                    <Store className="w-4 h-4 text-orange-600" /> Shop Front / Signboard Photo
-                  </span>
-                  {shopBannerUrl && (
-                    <span className="text-[10px] text-emerald-600 font-bold">Uploaded ✓</span>
-                  )}
-                </div>
-                <input
-                  type="file"
-                  accept="image/*"
-                  onChange={(e) => handleImageUpload(e, setShopBannerUrl)}
-                  className="block w-full text-xs text-slate-500 file:mr-3 file:py-1.5 file:px-3 file:rounded-xl file:border-0 file:text-xs file:font-semibold file:bg-orange-100 file:text-orange-700 hover:file:bg-orange-200"
+              <input
+                type="file"
+                accept="image/*"
+                onChange={(e) => handleImageUpload(e, setOwnerIdProofUrl)}
+                className="block w-full text-xs text-slate-500 file:mr-3 file:py-1.5 file:px-3 file:rounded-xl file:border-0 file:text-xs file:font-semibold file:bg-orange-100 file:text-orange-700 hover:file:bg-orange-200"
+              />
+              {ownerIdProofUrl && (
+                <img
+                  src={ownerIdProofUrl}
+                  alt="Proof Preview"
+                  className="w-full h-32 object-cover rounded-xl border border-slate-200"
                 />
-                {shopBannerUrl && (
-                  <img
-                    src={shopBannerUrl}
-                    alt="Shop Front Preview"
-                    className="w-full h-28 object-cover rounded-xl border border-slate-200"
-                  />
-                )}
-              </div>
+              )}
             </div>
 
-            {/* Submit Action */}
-            <div className="pt-4 border-t border-slate-100 flex flex-col sm:flex-row items-center justify-end gap-3">
+            <div className="pt-4 border-t border-slate-100 flex items-center justify-end">
               <button
                 type="submit"
                 className="w-full sm:w-auto px-8 py-3 bg-orange-600 hover:bg-orange-700 text-white font-bold text-sm rounded-2xl transition shadow-md flex items-center justify-center gap-2"
               >
                 <CheckCircle2 className="w-4 h-4" />
-                Submit Shop for Admin Approval
+                Submit Shop for Admin Verification
               </button>
             </div>
           </form>
         </div>
       )}
 
-      {/* TAB 2: VEHICLE REGISTRATION FORM */}
+      {/* ========================================================================= */}
+      {/* TAB 2: CAB, TAXI & TRAVELER REGISTRATION */}
+      {/* ========================================================================= */}
       {activeTab === 'vehicle' && (
         <div className="bg-white rounded-3xl border border-slate-200 p-6 sm:p-8 shadow-sm space-y-6">
           <div className="border-b border-slate-100 pb-4">
-            <h2 className="text-xl font-black text-slate-900 flex items-center gap-2">
+            <h2 className="text-lg font-black text-slate-900 flex items-center gap-2">
               <Car className="w-5 h-5 text-blue-600" />
-              Cab, Taxi, Traveler, Auto Rickshaw & Fleet Registration
+              2. Cab, Taxi & Tempo Traveler Registration Form
             </h2>
             <p className="text-xs text-slate-500 mt-1">
-              Submit your Driving License, Vehicle Registration Certificate (RC), and Route for admin approval.
+              Register commercial passenger vehicles for local & outstation routes across Meghalaya with 0% commission.
             </p>
           </div>
 
@@ -832,37 +868,22 @@ export const BusinessVehicleRegistrationView: React.FC<BusinessVehicleRegistrati
               {/* Vehicle Type */}
               <div>
                 <label className="block text-xs font-bold text-slate-800 uppercase tracking-wider mb-1.5">
-                  Vehicle Service Type *
+                  Vehicle Category *
                 </label>
                 <select
                   value={vehicleType}
                   onChange={(e) => setVehicleType(e.target.value)}
                   className="w-full px-4 py-2.5 bg-white border border-slate-300 rounded-xl text-sm font-bold text-slate-900 focus:outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20"
                 >
-                  {VEHICLE_TYPES.map((t) => (
-                    <option key={t} value={t} className="text-slate-900 font-semibold">
-                      {t}
+                  {VEHICLE_TYPES.map((v) => (
+                    <option key={v} value={v}>
+                      {v}
                     </option>
                   ))}
                 </select>
               </div>
 
-              {/* Vehicle Plate Number */}
-              <div>
-                <label className="block text-xs font-bold text-slate-800 uppercase tracking-wider mb-1.5">
-                  Vehicle Plate / Reg No. (RC) *
-                </label>
-                <input
-                  type="text"
-                  required
-                  placeholder="e.g. ML-08-A-4592"
-                  value={vehicleRegNo}
-                  onChange={(e) => setVehicleRegNo(e.target.value)}
-                  className="w-full px-4 py-2.5 bg-white border border-slate-300 rounded-xl text-sm font-mono font-bold uppercase text-slate-900 placeholder:text-slate-400 placeholder:font-normal focus:outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20"
-                />
-              </div>
-
-              {/* Vehicle Model & Year */}
+              {/* Vehicle Model */}
               <div>
                 <label className="block text-xs font-bold text-slate-800 uppercase tracking-wider mb-1.5">
                   Vehicle Model Name *
@@ -870,29 +891,44 @@ export const BusinessVehicleRegistrationView: React.FC<BusinessVehicleRegistrati
                 <input
                   type="text"
                   required
-                  placeholder="e.g. Maruti Suzuki Dzire Tour / Force Traveler"
+                  placeholder="e.g. Maruti Suzuki Swift Dzire / Force Traveller"
                   value={vehicleModel}
                   onChange={(e) => setVehicleModel(e.target.value)}
-                  className="w-full px-4 py-2.5 bg-white border border-slate-300 rounded-xl text-sm font-bold text-slate-900 placeholder:text-slate-400 placeholder:font-normal focus:outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20"
+                  className="w-full px-4 py-2.5 bg-white border border-slate-300 rounded-xl text-sm font-bold text-slate-900 focus:outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20"
                 />
               </div>
 
-              {/* Driving License No */}
+              {/* Vehicle Registration (RC) Number */}
               <div>
                 <label className="block text-xs font-bold text-slate-800 uppercase tracking-wider mb-1.5">
-                  Driving License Number *
+                  Vehicle RC / Number Plate *
                 </label>
                 <input
                   type="text"
                   required
-                  placeholder="e.g. ML08 20190004512"
-                  value={drivingLicenseNo}
-                  onChange={(e) => setDrivingLicenseNo(e.target.value)}
-                  className="w-full px-4 py-2.5 bg-white border border-slate-300 rounded-xl text-sm font-mono font-bold uppercase text-slate-900 placeholder:text-slate-400 placeholder:font-normal focus:outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20"
+                  placeholder="e.g. ML-08-C-1234"
+                  value={vehicleRegNo}
+                  onChange={(e) => setVehicleRegNo(e.target.value)}
+                  className="w-full px-4 py-2.5 bg-white border border-slate-300 rounded-xl text-sm font-mono font-bold text-slate-900 focus:outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20"
                 />
               </div>
 
-              {/* Driver Full Name */}
+              {/* Driving License Number */}
+              <div>
+                <label className="block text-xs font-bold text-slate-800 uppercase tracking-wider mb-1.5">
+                  Driving License (DL) Number *
+                </label>
+                <input
+                  type="text"
+                  required
+                  placeholder="e.g. ML08 20180004921"
+                  value={drivingLicenseNo}
+                  onChange={(e) => setDrivingLicenseNo(e.target.value)}
+                  className="w-full px-4 py-2.5 bg-white border border-slate-300 rounded-xl text-sm font-mono font-bold text-slate-900 focus:outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20"
+                />
+              </div>
+
+              {/* Driver Name & Phone */}
               <div>
                 <label className="block text-xs font-bold text-slate-800 uppercase tracking-wider mb-1.5">
                   Driver / Owner Full Name *
@@ -900,51 +936,64 @@ export const BusinessVehicleRegistrationView: React.FC<BusinessVehicleRegistrati
                 <input
                   type="text"
                   required
-                  placeholder="e.g. Dilseng Sangma"
+                  placeholder="e.g. Tengrik Sangma"
                   value={driverName}
                   onChange={(e) => setDriverName(e.target.value)}
-                  className="w-full px-4 py-2.5 bg-white border border-slate-300 rounded-xl text-sm font-bold text-slate-900 placeholder:text-slate-400 placeholder:font-normal focus:outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20"
+                  className="w-full px-4 py-2.5 bg-white border border-slate-300 rounded-xl text-sm font-bold text-slate-900 focus:outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20"
                 />
               </div>
 
-              {/* Driver Phone */}
               <div>
                 <label className="block text-xs font-bold text-slate-800 uppercase tracking-wider mb-1.5">
-                  Driver Mobile Phone *
+                  Driver Phone Number *
                 </label>
                 <input
                   type="tel"
                   required
-                  placeholder="e.g. 9123456780"
+                  placeholder="e.g. 9862012345"
                   value={driverPhone}
                   onChange={(e) => setDriverPhone(e.target.value)}
-                  className="w-full px-4 py-2.5 bg-white border border-slate-300 rounded-xl text-sm font-bold text-slate-900 placeholder:text-slate-400 placeholder:font-normal focus:outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20"
+                  className="w-full px-4 py-2.5 bg-white border border-slate-300 rounded-xl text-sm font-mono font-bold text-slate-900 focus:outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20"
                 />
               </div>
 
               {/* Operational Route */}
-              <div className="md:col-span-2">
+              <div>
                 <label className="block text-xs font-bold text-slate-800 uppercase tracking-wider mb-1.5">
-                  Operational Route / Service Area *
+                  Primary Route / Operation Area *
                 </label>
                 <input
                   type="text"
                   required
-                  placeholder="e.g. Tura to Guwahati Airport & Shillong (24x7)"
+                  placeholder="e.g. Tura to Guwahati / Tura to Shillong / Local Tura"
                   value={operationalRoute}
                   onChange={(e) => setOperationalRoute(e.target.value)}
-                  className="w-full px-4 py-2.5 bg-white border border-slate-300 rounded-xl text-sm font-bold text-slate-900 placeholder:text-slate-400 placeholder:font-normal focus:outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20"
+                  className="w-full px-4 py-2.5 bg-white border border-slate-300 rounded-xl text-sm font-bold text-slate-900 focus:outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20"
+                />
+              </div>
+
+              {/* Daily Fare / Estimated Rate */}
+              <div>
+                <label className="block text-xs font-bold text-slate-800 uppercase tracking-wider mb-1.5">
+                  Typical Fare / Daily Rate
+                </label>
+                <input
+                  type="text"
+                  placeholder="e.g. ₹500/seat or ₹3,500 Full Reserve"
+                  value={dailyRate}
+                  onChange={(e) => setDailyRate(e.target.value)}
+                  className="w-full px-4 py-2.5 bg-white border border-slate-300 rounded-xl text-sm font-bold text-slate-900 focus:outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20"
                 />
               </div>
             </div>
 
-            {/* Vehicle Base Local Location (State, District, Block, Village) */}
+            {/* Vehicle Location Hierarchy */}
             <div className="bg-slate-50 border border-slate-200 rounded-2xl p-4 space-y-3">
               <h3 className="text-xs font-extrabold text-slate-900 uppercase tracking-wider flex items-center gap-1.5">
-                <MapPin className="w-3.5 h-3.5 text-blue-600" /> Vehicle / Driver Home Base (Meghalaya District & Block) *
+                <MapPin className="w-3.5 h-3.5 text-blue-600" /> Driver Base Location (Meghalaya District & Block) *
               </h3>
               <LocalAddressSelector
-                idPrefix="vehicle_reg"
+                idPrefix="veh_reg"
                 values={vehLocation}
                 onChange={(field, val) =>
                   setVehLocation((prev) => ({ ...prev, [field]: val }))
@@ -954,151 +1003,284 @@ export const BusinessVehicleRegistrationView: React.FC<BusinessVehicleRegistrati
               />
             </div>
 
-            {/* PART 2: VEHICLE DRIVER PAYOUT DETAILS */}
-            <div className="bg-blue-50/60 border-2 border-blue-200 rounded-3xl p-5 sm:p-6 space-y-4">
-              <div className="flex items-center gap-2 border-b border-blue-200 pb-2">
-                <CreditCard className="w-5 h-5 text-blue-600 shrink-0" />
-                <div>
-                  <h3 className="text-sm font-black text-blue-950">
-                    Driver Payout & Settlement Account (Direct Payment) *
-                  </h3>
-                  <p className="text-[11px] font-semibold text-blue-900">
-                    Apna personal UPI ID enter karein taaki customer aapko direct pay kar sake.
-                  </p>
-                </div>
-              </div>
-
-              <div>
-                <label className="block text-xs font-bold text-slate-800 uppercase mb-1.5 flex items-center gap-1.5">
-                  <QrCode className="w-3.5 h-3.5 text-blue-600" /> Driver Personal UPI ID * (Direct Customer Payment)
-                </label>
-                <input
-                  type="text"
-                  required
-                  placeholder="e.g. driver@oksbi or 9123456780@paytm"
-                  value={vehPayoutUpi}
-                  onChange={(e) => setVehPayoutUpi(e.target.value)}
-                  className="w-full px-4 py-2.5 bg-white border border-slate-300 rounded-xl text-sm font-mono font-bold text-slate-900 placeholder:text-slate-400 placeholder:font-normal focus:outline-none focus:border-blue-500"
-                />
-                <p className="text-[11px] text-slate-600 font-medium mt-1">
-                  💡 Apna personal UPI ID enter karein taaki customer aapko direct pay kar sake.
-                </p>
-              </div>
-
+            {/* Driver Settlement UPI ID */}
+            <div className="p-4 bg-blue-50/60 border border-blue-200 rounded-2xl space-y-3">
+              <h3 className="text-xs font-extrabold text-blue-950 uppercase tracking-wider flex items-center gap-1.5">
+                <QrCode className="w-4 h-4 text-blue-600" /> Driver Payout & Settlement UPI ID *
+              </h3>
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                 <div>
-                  <label className="block text-[11px] font-bold text-slate-800 uppercase mb-1">
-                    Bank Name
+                  <label className="block text-[11px] font-bold text-slate-700 mb-1">
+                    Driver Payout UPI ID *
                   </label>
                   <input
                     type="text"
-                    placeholder="e.g. State Bank of India"
+                    required
+                    placeholder="e.g. driver@oksbi"
+                    value={vehPayoutUpi}
+                    onChange={(e) => setVehPayoutUpi(e.target.value)}
+                    className="w-full px-4 py-2.5 bg-white border border-slate-300 rounded-xl text-sm font-mono font-bold text-slate-900 focus:outline-none focus:border-blue-500"
+                  />
+                </div>
+                <div>
+                  <label className="block text-[11px] font-bold text-slate-700 mb-1">
+                    Bank Name (Optional)
+                  </label>
+                  <input
+                    type="text"
+                    placeholder="e.g. Meghalaya Rural Bank"
                     value={vehBankName}
                     onChange={(e) => setVehBankName(e.target.value)}
-                    className="w-full px-3.5 py-2 bg-white border border-slate-300 rounded-xl text-xs font-bold text-slate-900 placeholder:text-slate-400 focus:outline-none focus:border-blue-500"
-                  />
-                </div>
-
-                <div>
-                  <label className="block text-[11px] font-bold text-slate-800 uppercase mb-1">
-                    Account Number
-                  </label>
-                  <input
-                    type="text"
-                    placeholder="e.g. 30219845123"
-                    value={vehAccountNo}
-                    onChange={(e) => setVehAccountNo(e.target.value)}
-                    className="w-full px-3.5 py-2 bg-white border border-slate-300 rounded-xl text-xs font-mono font-bold text-slate-900 placeholder:text-slate-400 focus:outline-none focus:border-blue-500"
-                  />
-                </div>
-
-                <div className="sm:col-span-2">
-                  <label className="block text-[11px] font-bold text-slate-800 uppercase mb-1">
-                    IFSC Code
-                  </label>
-                  <input
-                    type="text"
-                    placeholder="e.g. SBIN0000198"
-                    value={vehIfscCode}
-                    onChange={(e) => setVehIfscCode(e.target.value)}
-                    className="w-full px-3.5 py-2 bg-white border border-slate-300 rounded-xl text-xs font-mono font-bold uppercase text-slate-900 placeholder:text-slate-400 focus:outline-none focus:border-blue-500"
+                    className="w-full px-4 py-2.5 bg-white border border-slate-300 rounded-xl text-sm text-slate-900 focus:outline-none focus:border-blue-500"
                   />
                 </div>
               </div>
             </div>
 
-            {/* Document Upload */}
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-5 pt-2">
-              <div className="p-4 bg-slate-50 border border-slate-200 rounded-2xl space-y-3">
-                <div className="flex items-center justify-between">
-                  <span className="text-xs font-bold text-slate-800 flex items-center gap-1.5">
-                    <FileText className="w-4 h-4 text-blue-600" /> Driving License (DL) Photo
-                  </span>
-                  {dlProofUrl && (
-                    <span className="text-[10px] text-emerald-600 font-bold">Uploaded ✓</span>
-                  )}
-                </div>
-                <input
-                  type="file"
-                  accept="image/*"
-                  onChange={(e) => handleImageUpload(e, setDlProofUrl)}
-                  className="block w-full text-xs text-slate-500 file:mr-3 file:py-1.5 file:px-3 file:rounded-xl file:border-0 file:text-xs file:font-semibold file:bg-blue-100 file:text-blue-700 hover:file:bg-blue-200"
-                />
+            {/* DL Proof Photo Upload */}
+            <div className="p-4 bg-slate-50 border border-slate-200 rounded-2xl space-y-3">
+              <div className="flex items-center justify-between">
+                <span className="text-xs font-bold text-slate-800 flex items-center gap-1.5">
+                  <FileText className="w-4 h-4 text-blue-600" /> Driving License (DL) / Commercial Permit Photo *
+                </span>
                 {dlProofUrl && (
-                  <img
-                    src={dlProofUrl}
-                    alt="DL Preview"
-                    className="w-full h-28 object-cover rounded-xl border border-slate-200"
-                  />
+                  <span className="text-[10px] text-emerald-600 font-bold">Uploaded ✓</span>
                 )}
               </div>
-
-              <div className="p-4 bg-slate-50 border border-slate-200 rounded-2xl space-y-3">
-                <div className="flex items-center justify-between">
-                  <span className="text-xs font-bold text-slate-800 flex items-center gap-1.5">
-                    <Car className="w-4 h-4 text-indigo-600" /> Vehicle Exterior Photo
-                  </span>
-                  {vehiclePhotoUrl && (
-                    <span className="text-[10px] text-emerald-600 font-bold">Uploaded ✓</span>
-                  )}
-                </div>
-                <input
-                  type="file"
-                  accept="image/*"
-                  onChange={(e) => handleImageUpload(e, setVehiclePhotoUrl)}
-                  className="block w-full text-xs text-slate-500 file:mr-3 file:py-1.5 file:px-3 file:rounded-xl file:border-0 file:text-xs file:font-semibold file:bg-indigo-100 file:text-indigo-700 hover:file:bg-indigo-200"
+              <input
+                type="file"
+                accept="image/*"
+                onChange={(e) => handleImageUpload(e, setDlProofUrl)}
+                className="block w-full text-xs text-slate-500 file:mr-3 file:py-1.5 file:px-3 file:rounded-xl file:border-0 file:text-xs file:font-semibold file:bg-blue-100 file:text-blue-700 hover:file:bg-blue-200"
+              />
+              {dlProofUrl && (
+                <img
+                  src={dlProofUrl}
+                  alt="DL Proof Preview"
+                  className="w-full h-32 object-cover rounded-xl border border-slate-200"
                 />
-                {vehiclePhotoUrl && (
-                  <img
-                    src={vehiclePhotoUrl}
-                    alt="Vehicle Preview"
-                    className="w-full h-28 object-cover rounded-xl border border-slate-200"
-                  />
-                )}
-              </div>
+              )}
             </div>
 
-            {/* Submit Action */}
-            <div className="pt-4 border-t border-slate-100 flex flex-col sm:flex-row items-center justify-end gap-3">
+            <div className="pt-4 border-t border-slate-100 flex items-center justify-end">
               <button
                 type="submit"
                 className="w-full sm:w-auto px-8 py-3 bg-blue-600 hover:bg-blue-700 text-white font-bold text-sm rounded-2xl transition shadow-md flex items-center justify-center gap-2"
               >
                 <CheckCircle2 className="w-4 h-4" />
-                Submit Vehicle for Admin Approval
+                Submit Vehicle for Admin Verification
               </button>
             </div>
           </form>
         </div>
       )}
 
-      {/* TAB 3: LOCAL SERVICES & JOBS REGISTRATION FORM */}
+      {/* ========================================================================= */}
+      {/* TAB 3: DELIVERY BOY / RIDER REGISTRATION */}
+      {/* ========================================================================= */}
+      {activeTab === 'delivery_boy' && (
+        <div className="bg-white rounded-3xl border border-slate-200 p-6 sm:p-8 shadow-sm space-y-6">
+          <div className="border-b border-slate-100 pb-4">
+            <h2 className="text-lg font-black text-slate-900 flex items-center gap-2">
+              <Bike className="w-5 h-5 text-emerald-600" />
+              3. Delivery Boy / Rider Fleet Registration Form
+            </h2>
+            <p className="text-xs text-slate-500 mt-1">
+              Join the Meri Local Bazaar delivery fleet with your bike, scooty, or auto. Earn per-delivery and withdraw earnings instantly via UPI!
+            </p>
+          </div>
+
+          <form onSubmit={handleSubmitDeliveryBoyForm} className="space-y-6">
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
+              {/* Full Name */}
+              <div>
+                <label className="block text-xs font-bold text-slate-800 uppercase tracking-wider mb-1.5">
+                  Rider Full Name *
+                </label>
+                <input
+                  type="text"
+                  required
+                  placeholder="e.g. Sengbat R. Marak"
+                  value={dbFullName}
+                  onChange={(e) => setDbFullName(e.target.value)}
+                  className="w-full px-4 py-2.5 bg-white border border-slate-300 rounded-xl text-sm font-bold text-slate-900 focus:outline-none focus:border-emerald-500 focus:ring-2 focus:ring-emerald-500/20"
+                />
+              </div>
+
+              {/* Phone Number */}
+              <div>
+                <label className="block text-xs font-bold text-slate-800 uppercase tracking-wider mb-1.5">
+                  Mobile Number (Calling & WhatsApp) *
+                </label>
+                <input
+                  type="tel"
+                  required
+                  placeholder="e.g. 9862012345"
+                  value={dbPhone}
+                  onChange={(e) => setDbPhone(e.target.value)}
+                  className="w-full px-4 py-2.5 bg-white border border-slate-300 rounded-xl text-sm font-mono font-bold text-slate-900 focus:outline-none focus:border-emerald-500 focus:ring-2 focus:ring-emerald-500/20"
+                />
+              </div>
+
+              {/* Vehicle Type */}
+              <div>
+                <label className="block text-xs font-bold text-slate-800 uppercase tracking-wider mb-1.5">
+                  Delivery Vehicle Type *
+                </label>
+                <select
+                  value={dbVehicleType}
+                  onChange={(e) => setDbVehicleType(e.target.value as any)}
+                  className="w-full px-4 py-2.5 bg-white border border-slate-300 rounded-xl text-sm font-bold text-slate-900 focus:outline-none focus:border-emerald-500 focus:ring-2 focus:ring-emerald-500/20"
+                >
+                  <option value="Bike">Motorcycle / Bike</option>
+                  <option value="Scooty">Scooter / Scooty</option>
+                  <option value="Auto">Passenger Auto</option>
+                  <option value="Commercial Auto">Commercial Cargo Auto</option>
+                </select>
+              </div>
+
+              {/* Vehicle Number */}
+              <div>
+                <label className="block text-xs font-bold text-slate-800 uppercase tracking-wider mb-1.5">
+                  Vehicle Number Plate *
+                </label>
+                <input
+                  type="text"
+                  required
+                  placeholder="e.g. ML-08-A-5678"
+                  value={dbVehicleNumber}
+                  onChange={(e) => setDbVehicleNumber(e.target.value)}
+                  className="w-full px-4 py-2.5 bg-white border border-slate-300 rounded-xl text-sm font-mono font-bold text-slate-900 focus:outline-none focus:border-emerald-500 focus:ring-2 focus:ring-emerald-500/20"
+                />
+              </div>
+
+              {/* Driving License Number */}
+              <div>
+                <label className="block text-xs font-bold text-slate-800 uppercase tracking-wider mb-1.5">
+                  Driving License (DL) Number
+                </label>
+                <input
+                  type="text"
+                  placeholder="e.g. ML08 20210009876"
+                  value={dbDlNo}
+                  onChange={(e) => setDbDlNo(e.target.value)}
+                  className="w-full px-4 py-2.5 bg-white border border-slate-300 rounded-xl text-sm font-mono font-bold text-slate-900 focus:outline-none focus:border-emerald-500 focus:ring-2 focus:ring-emerald-500/20"
+                />
+              </div>
+
+              {/* Vehicle RC Number */}
+              <div>
+                <label className="block text-xs font-bold text-slate-800 uppercase tracking-wider mb-1.5">
+                  Vehicle RC Book / Smart Card No
+                </label>
+                <input
+                  type="text"
+                  placeholder="e.g. RC-ML08-88492"
+                  value={dbRcNo}
+                  onChange={(e) => setDbRcNo(e.target.value)}
+                  className="w-full px-4 py-2.5 bg-white border border-slate-300 rounded-xl text-sm font-mono font-bold text-slate-900 focus:outline-none focus:border-emerald-500 focus:ring-2 focus:ring-emerald-500/20"
+                />
+              </div>
+            </div>
+
+            {/* Local Location Hierarchy */}
+            <div className="bg-slate-50 border border-slate-200 rounded-2xl p-4 space-y-3">
+              <h3 className="text-xs font-extrabold text-slate-900 uppercase tracking-wider flex items-center gap-1.5">
+                <MapPin className="w-3.5 h-3.5 text-emerald-600" /> Operating Location (Meghalaya District & Block) *
+              </h3>
+              <LocalAddressSelector
+                idPrefix="db_reg"
+                values={dbLocation}
+                onChange={(field, val) =>
+                  setDbLocation((prev) => ({ ...prev, [field]: val }))
+                }
+                theme="light"
+                required={true}
+              />
+            </div>
+
+            {/* Settlement UPI ID */}
+            <div className="p-4 bg-emerald-50/60 border border-emerald-200 rounded-2xl space-y-3">
+              <h3 className="text-xs font-extrabold text-emerald-950 uppercase tracking-wider flex items-center gap-1.5">
+                <QrCode className="w-4 h-4 text-emerald-600" /> Delivery Payout UPI ID (Required for Instant Earnings) *
+              </h3>
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                <div>
+                  <label className="block text-[11px] font-bold text-slate-700 mb-1">
+                    Your Personal Payout UPI ID *
+                  </label>
+                  <input
+                    type="text"
+                    required
+                    placeholder="e.g. sengbat@oksbi or 9862012345@paytm"
+                    value={dbPayoutUpi}
+                    onChange={(e) => setDbPayoutUpi(e.target.value)}
+                    className="w-full px-4 py-2.5 bg-white border border-slate-300 rounded-xl text-sm font-mono font-bold text-slate-900 focus:outline-none focus:border-emerald-500"
+                  />
+                  <p className="text-[10px] text-slate-500 mt-1">Har delivery ka payment seedhe isi UPI ID me settle hoga.</p>
+                </div>
+                <div>
+                  <label className="block text-[11px] font-bold text-slate-700 mb-1">
+                    Bank Name (Optional)
+                  </label>
+                  <input
+                    type="text"
+                    placeholder="e.g. State Bank of India / HDFC"
+                    value={dbBankName}
+                    onChange={(e) => setDbBankName(e.target.value)}
+                    className="w-full px-4 py-2.5 bg-white border border-slate-300 rounded-xl text-sm text-slate-900 focus:outline-none focus:border-emerald-500"
+                  />
+                </div>
+              </div>
+            </div>
+
+            {/* DL / ID Proof Upload */}
+            <div className="p-4 bg-slate-50 border border-slate-200 rounded-2xl space-y-3">
+              <div className="flex items-center justify-between">
+                <span className="text-xs font-bold text-slate-800 flex items-center gap-1.5">
+                  <FileText className="w-4 h-4 text-emerald-600" /> Driving License / Aadhaar Photo Upload
+                </span>
+                {dbDlProofUrl && (
+                  <span className="text-[10px] text-emerald-600 font-bold">Uploaded ✓</span>
+                )}
+              </div>
+              <input
+                type="file"
+                accept="image/*"
+                onChange={(e) => handleImageUpload(e, setDbDlProofUrl)}
+                className="block w-full text-xs text-slate-500 file:mr-3 file:py-1.5 file:px-3 file:rounded-xl file:border-0 file:text-xs file:font-semibold file:bg-emerald-100 file:text-emerald-700 hover:file:bg-emerald-200"
+              />
+              {dbDlProofUrl && (
+                <img
+                  src={dbDlProofUrl}
+                  alt="DL Proof Preview"
+                  className="w-full h-32 object-cover rounded-xl border border-slate-200"
+                />
+              )}
+            </div>
+
+            <div className="pt-4 border-t border-slate-100 flex items-center justify-end">
+              <button
+                type="submit"
+                className="w-full sm:w-auto px-8 py-3 bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-sm rounded-2xl transition shadow-md flex items-center justify-center gap-2"
+              >
+                <CheckCircle2 className="w-4 h-4" />
+                Submit Delivery Boy Registration
+              </button>
+            </div>
+          </form>
+        </div>
+      )}
+
+      {/* ========================================================================= */}
+      {/* TAB 4: LOCAL SERVICES & SKILLED JOB REQUESTS */}
+      {/* ========================================================================= */}
       {activeTab === 'services_jobs' && (
         <div className="bg-white rounded-3xl border border-slate-200 p-6 sm:p-8 shadow-sm space-y-6">
           <div className="border-b border-slate-100 pb-4">
-            <h2 className="text-xl font-black text-slate-900 flex items-center gap-2">
+            <h2 className="text-lg font-black text-slate-900 flex items-center gap-2">
               <Briefcase className="w-5 h-5 text-purple-600" />
-              Local Services & Skilled Jobs Provider Registration
+              4. Local Services & Skilled Jobs Provider Registration
             </h2>
             <p className="text-xs text-slate-500 mt-1">
               Join as a verified electrician, plumber, mechanic, technician, driver, or skilled worker on Meri Local Bazaar.
@@ -1255,13 +1437,10 @@ export const BusinessVehicleRegistrationView: React.FC<BusinessVehicleRegistrati
                   onChange={(e) => setSrvPayoutUpi(e.target.value)}
                   className="w-full px-4 py-2.5 bg-white border border-slate-300 rounded-xl text-sm font-mono font-bold text-slate-900 focus:outline-none focus:border-purple-500 focus:ring-2 focus:ring-purple-500/20"
                 />
-                <p className="text-[11px] text-slate-600 font-medium mt-1">
-                  💡 Apna personal UPI ID enter karein taaki customer aapko direct pay kar sake.
-                </p>
               </div>
             </div>
 
-            {/* Service Provider Local Location (State, District, Block, Village) */}
+            {/* Service Location Hierarchy */}
             <div className="bg-slate-50 border border-slate-200 rounded-2xl p-4 space-y-3">
               <h3 className="text-xs font-extrabold text-slate-900 uppercase tracking-wider flex items-center gap-1.5">
                 <MapPin className="w-3.5 h-3.5 text-purple-600" /> Service Location Hierarchy (Meghalaya District & Block) *
@@ -1291,7 +1470,7 @@ export const BusinessVehicleRegistrationView: React.FC<BusinessVehicleRegistrati
               />
             </div>
 
-            {/* Document Upload for Identity Proof */}
+            {/* Identity Proof Upload */}
             <div className="p-4 bg-slate-50 border border-slate-200 rounded-2xl space-y-3">
               <div className="flex items-center justify-between">
                 <span className="text-xs font-bold text-slate-800 flex items-center gap-1.5">
@@ -1316,8 +1495,7 @@ export const BusinessVehicleRegistrationView: React.FC<BusinessVehicleRegistrati
               )}
             </div>
 
-            {/* Submit Action */}
-            <div className="pt-4 border-t border-slate-100 flex flex-col sm:flex-row items-center justify-end gap-3">
+            <div className="pt-4 border-t border-slate-100 flex items-center justify-end">
               <button
                 type="submit"
                 className="w-full sm:w-auto px-8 py-3 bg-purple-600 hover:bg-purple-700 text-white font-bold text-sm rounded-2xl transition shadow-md flex items-center justify-center gap-2"
@@ -1330,38 +1508,113 @@ export const BusinessVehicleRegistrationView: React.FC<BusinessVehicleRegistrati
         </div>
       )}
 
-      {/* TAB 4: MY SUBMISSION STATUS */}
+      {/* ========================================================================= */}
+      {/* TAB 5: MY SUBMISSIONS STATUS & WITHDRAWABLE WALLET */}
+      {/* ========================================================================= */}
       {activeTab === 'my_status' && (
         <div className="space-y-6">
+          {/* Wallet Balance & Instant Payout Card */}
+          <div className="bg-gradient-to-br from-slate-900 via-slate-800 to-emerald-950 text-white rounded-3xl p-6 sm:p-8 border border-slate-700 shadow-xl space-y-5">
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+              <div>
+                <span className="text-[11px] font-bold uppercase tracking-wider text-emerald-400 bg-emerald-500/20 px-3 py-1 rounded-full border border-emerald-500/30 inline-flex items-center gap-1.5 mb-2">
+                  <Wallet className="w-3.5 h-3.5" /> Partner Earnings Wallet
+                </span>
+                <h3 className="text-xl sm:text-2xl font-black text-white">
+                  Total Withdrawable Balance
+                </h3>
+                <div className="text-3xl sm:text-4xl font-black text-emerald-400 mt-2 font-mono">
+                  ₹{formatPrice(myWalletBalance)}
+                </div>
+                <p className="text-xs text-slate-300 mt-1">
+                  Settled directly to your UPI ID (<span className="text-emerald-300 font-mono font-bold">{currentUser?.payout_upi_id || 'Not configured'}</span>)
+                </p>
+              </div>
+
+              <div className="flex flex-col sm:flex-row gap-2 shrink-0">
+                <button
+                  onClick={() => setShowPayoutModal(true)}
+                  disabled={myWalletBalance <= 0}
+                  className="px-6 py-3 bg-emerald-600 hover:bg-emerald-700 disabled:opacity-50 disabled:cursor-not-allowed text-white text-xs font-black rounded-2xl transition flex items-center justify-center gap-2 shadow-md cursor-pointer"
+                >
+                  <Send className="w-4 h-4" /> Request Payout / Withdraw
+                </button>
+                {myDeliveryPartnerActive && onNavigateToDeliveryDashboard && (
+                  <button
+                    onClick={onNavigateToDeliveryDashboard}
+                    className="px-5 py-3 bg-white/10 hover:bg-white/20 text-white text-xs font-bold rounded-2xl transition border border-white/20 flex items-center justify-center gap-1.5"
+                  >
+                    <Bike className="w-4 h-4 text-emerald-400" /> Open Delivery Dashboard
+                  </button>
+                )}
+              </div>
+            </div>
+
+            {/* Payout Requests History for Current User */}
+            {myPayouts.length > 0 && (
+              <div className="pt-4 border-t border-slate-700/80 space-y-2">
+                <h4 className="text-xs font-bold text-slate-300 uppercase tracking-wider">
+                  Recent Withdrawal Requests ({myPayouts.length})
+                </h4>
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                  {myPayouts.slice(0, 4).map((p) => (
+                    <div
+                      key={p.id}
+                      className="p-3 bg-slate-800/80 border border-slate-700 rounded-xl flex items-center justify-between text-xs"
+                    >
+                      <div>
+                        <div className="font-bold text-white">₹{formatPrice(p.amount)}</div>
+                        <div className="text-[10px] text-slate-400 font-mono">{p.upi_id}</div>
+                      </div>
+                      <span
+                        className={`text-[10px] font-black uppercase px-2 py-0.5 rounded-full ${
+                          p.status === 'completed'
+                            ? 'bg-emerald-500/20 text-emerald-300 border border-emerald-500/30'
+                            : p.status === 'rejected'
+                            ? 'bg-red-500/20 text-red-300 border border-red-500/30'
+                            : 'bg-amber-500/20 text-amber-300 border border-amber-500/30'
+                        }`}
+                      >
+                        {p.status}
+                      </span>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+          </div>
+
+          {/* Submissions Status Section */}
           <div className="bg-white rounded-3xl border border-slate-200 p-6 sm:p-8 shadow-sm space-y-4">
             <h2 className="text-lg font-black text-slate-900 flex items-center gap-2">
               <FileCheck className="w-5 h-5 text-emerald-600" />
               My Registered Businesses, Fleet & Profiles Status
             </h2>
             <p className="text-xs text-slate-500">
-              Track the admin approval status of your submitted local shops, taxis, and services & jobs profiles.
+              Track the live admin approval status of all your submitted shops, taxis, delivery boy profiles, and skilled jobs.
             </p>
 
-            {myShops.length === 0 && myVehicles.length === 0 && myServices.length === 0 ? (
+            {myShops.length === 0 && myVehicles.length === 0 && myServices.length === 0 && !myDeliveryPartnerActive ? (
               <div className="text-center py-8 border border-dashed border-slate-200 rounded-2xl">
                 <Store className="w-10 h-10 text-slate-300 mx-auto mb-2" />
                 <p className="text-sm font-bold text-slate-600">No applications submitted yet</p>
                 <p className="text-xs text-slate-400 mt-0.5">
-                  Use the tabs above to submit your shop, commercial vehicle, or local service profile.
+                  Use the registration tabs above to submit your shop, cab/taxi, delivery boy profile, or local service.
                 </p>
               </div>
             ) : (
               <div className="space-y-4">
+                {/* 1. Shop Submissions */}
                 {myShops.map((shop) => (
                   <div
                     key={shop.id}
-                    className="p-4 border rounded-2xl bg-slate-50 border-slate-200 flex flex-col sm:flex-row justify-between items-start sm:items-center gap-3"
+                    className="p-4 border rounded-2xl bg-orange-50/30 border-orange-200 flex flex-col sm:flex-row justify-between items-start sm:items-center gap-3"
                   >
                     <div>
                       <div className="flex items-center gap-2">
                         <span className="font-bold text-slate-900 text-sm">{shop.shop_name}</span>
                         <span className="text-[10px] font-bold bg-orange-100 text-orange-800 px-2 py-0.5 rounded-full">
-                          Shop
+                          1. Shop / Seller
                         </span>
                       </div>
                       <p className="text-xs text-slate-500 mt-0.5">
@@ -1371,10 +1624,10 @@ export const BusinessVehicleRegistrationView: React.FC<BusinessVehicleRegistrati
                     <span
                       className={`text-xs font-bold px-3 py-1 rounded-full uppercase ${
                         shop.status === 'approved'
-                          ? 'bg-emerald-100 text-emerald-800'
+                          ? 'bg-emerald-100 text-emerald-800 border border-emerald-300'
                           : shop.status === 'rejected'
-                          ? 'bg-red-100 text-red-800'
-                          : 'bg-amber-100 text-amber-800'
+                          ? 'bg-red-100 text-red-800 border border-red-300'
+                          : 'bg-amber-100 text-amber-800 border border-amber-300'
                       }`}
                     >
                       {shop.status}
@@ -1382,10 +1635,11 @@ export const BusinessVehicleRegistrationView: React.FC<BusinessVehicleRegistrati
                   </div>
                 ))}
 
+                {/* 2. Vehicle Submissions */}
                 {myVehicles.map((veh) => (
                   <div
                     key={veh.id}
-                    className="p-4 border rounded-2xl bg-slate-50 border-slate-200 flex flex-col sm:flex-row justify-between items-start sm:items-center gap-3"
+                    className="p-4 border rounded-2xl bg-blue-50/30 border-blue-200 flex flex-col sm:flex-row justify-between items-start sm:items-center gap-3"
                   >
                     <div>
                       <div className="flex items-center gap-2">
@@ -1393,20 +1647,20 @@ export const BusinessVehicleRegistrationView: React.FC<BusinessVehicleRegistrati
                           {veh.vehicle_model} ({veh.vehicle_reg_no})
                         </span>
                         <span className="text-[10px] font-bold bg-blue-100 text-blue-800 px-2 py-0.5 rounded-full">
-                          {veh.vehicle_type}
+                          2. Cab & Taxi
                         </span>
                       </div>
                       <p className="text-xs text-slate-500 mt-0.5">
-                        Route: {veh.operational_route} • Payout UPI: {veh.payout_upi_id || 'N/A'}
+                        Route: {veh.operational_route} • DL: {veh.driving_license_no} • Payout UPI: {veh.payout_upi_id || 'N/A'}
                       </p>
                     </div>
                     <span
                       className={`text-xs font-bold px-3 py-1 rounded-full uppercase ${
                         veh.status === 'approved'
-                          ? 'bg-emerald-100 text-emerald-800'
+                          ? 'bg-emerald-100 text-emerald-800 border border-emerald-300'
                           : veh.status === 'rejected'
-                          ? 'bg-red-100 text-red-800'
-                          : 'bg-amber-100 text-amber-800'
+                          ? 'bg-red-100 text-red-800 border border-red-300'
+                          : 'bg-amber-100 text-amber-800 border border-amber-300'
                       }`}
                     >
                       {veh.status}
@@ -1414,6 +1668,37 @@ export const BusinessVehicleRegistrationView: React.FC<BusinessVehicleRegistrati
                   </div>
                 ))}
 
+                {/* 3. Delivery Partner Profile */}
+                {myDeliveryPartnerActive && (
+                  <div className="p-4 border rounded-2xl bg-emerald-50/30 border-emerald-200 flex flex-col sm:flex-row justify-between items-start sm:items-center gap-3">
+                    <div>
+                      <div className="flex items-center gap-2">
+                        <span className="font-bold text-slate-900 text-sm">
+                          {currentUser.full_name || 'Delivery Partner'} ({currentUser.vehicle_type || 'Bike'} - {currentUser.vehicle_number || 'Registered'})
+                        </span>
+                        <span className="text-[10px] font-bold bg-emerald-100 text-emerald-800 px-2 py-0.5 rounded-full">
+                          3. Delivery Boy Fleet
+                        </span>
+                      </div>
+                      <p className="text-xs text-slate-500 mt-0.5">
+                        Status: {currentUser.partner_status || 'Active'} • Payout UPI: {currentUser.payout_upi_id || 'Configured'}
+                      </p>
+                    </div>
+                    <span
+                      className={`text-xs font-bold px-3 py-1 rounded-full uppercase ${
+                        currentUser.partner_status === 'active' || currentUser.is_approved_by_admin
+                          ? 'bg-emerald-100 text-emerald-800 border border-emerald-300'
+                          : currentUser.partner_status === 'rejected'
+                          ? 'bg-red-100 text-red-800 border border-red-300'
+                          : 'bg-amber-100 text-amber-800 border border-amber-300'
+                      }`}
+                    >
+                      {currentUser.partner_status || 'Pending'}
+                    </span>
+                  </div>
+                )}
+
+                {/* 4. Service Registrations */}
                 {myServices.map((srv) => {
                   const isApproved = srv.is_approved || srv.status === 'approved';
                   const isRejected = srv.status === 'rejected';
@@ -1421,26 +1706,26 @@ export const BusinessVehicleRegistrationView: React.FC<BusinessVehicleRegistrati
                   return (
                     <div
                       key={srv.id}
-                      className="p-4 border rounded-2xl bg-slate-50 border-slate-200 flex flex-col sm:flex-row justify-between items-start sm:items-center gap-3"
+                      className="p-4 border rounded-2xl bg-purple-50/30 border-purple-200 flex flex-col sm:flex-row justify-between items-start sm:items-center gap-3"
                     >
                       <div>
                         <div className="flex items-center gap-2">
                           <span className="font-bold text-slate-900 text-sm">{srv.full_name}</span>
                           <span className="text-[10px] font-bold bg-purple-100 text-purple-800 px-2 py-0.5 rounded-full">
-                            Service & Job Profile
+                            4. Local Services & Jobs
                           </span>
                         </div>
                         <p className="text-xs text-slate-500 mt-0.5">
-                          {srv.category} • Experience: {srv.experience} • Locality: {srv.city_locality || 'Local'}
+                          {srv.category} • Experience: {srv.experience} • Locality: {srv.city_locality || 'Local'} • Payout UPI: {srv.payout_upi || srv.payout_upi_id || 'N/A'}
                         </p>
                       </div>
                       <span
                         className={`text-xs font-bold px-3 py-1 rounded-full uppercase ${
                           isApproved
-                            ? 'bg-emerald-100 text-emerald-800'
+                            ? 'bg-emerald-100 text-emerald-800 border border-emerald-300'
                             : isRejected
-                            ? 'bg-red-100 text-red-800'
-                            : 'bg-amber-100 text-amber-800'
+                            ? 'bg-red-100 text-red-800 border border-red-300'
+                            : 'bg-amber-100 text-amber-800 border border-amber-300'
                         }`}
                       >
                         {isApproved ? 'Approved' : isRejected ? 'Rejected' : 'Pending'}
@@ -1450,6 +1735,109 @@ export const BusinessVehicleRegistrationView: React.FC<BusinessVehicleRegistrati
                 })}
               </div>
             )}
+          </div>
+        </div>
+      )}
+
+      {/* MODAL: REQUEST PAYOUT / WITHDRAWAL */}
+      {showPayoutModal && (
+        <div className="fixed inset-0 bg-black/60 backdrop-blur-sm z-50 flex items-center justify-center p-4 animate-in fade-in">
+          <div className="bg-white rounded-3xl p-6 sm:p-8 max-w-md w-full shadow-2xl space-y-5 border border-slate-200">
+            <div className="flex items-center justify-between border-b border-slate-100 pb-3">
+              <div className="flex items-center gap-2">
+                <Wallet className="w-5 h-5 text-emerald-600" />
+                <h3 className="text-base font-black text-slate-900">Request Wallet Withdrawal</h3>
+              </div>
+              <button
+                onClick={() => setShowPayoutModal(false)}
+                className="text-slate-400 hover:text-slate-600"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            <div className="p-3.5 bg-emerald-50 rounded-2xl border border-emerald-200 text-xs flex items-center justify-between">
+              <div>
+                <span className="text-emerald-800 font-bold">Withdrawable Balance:</span>
+                <div className="text-lg font-black text-emerald-700 font-mono">
+                  ₹{formatPrice(myWalletBalance)}
+                </div>
+              </div>
+              <span className="text-[10px] font-bold bg-emerald-100 text-emerald-800 px-2 py-1 rounded-lg">
+                Direct UPI Transfer
+              </span>
+            </div>
+
+            <form onSubmit={handlePayoutSubmit} className="space-y-4">
+              <div>
+                <label className="block text-xs font-bold text-slate-700 mb-1">
+                  Withdrawal Amount (₹) *
+                </label>
+                <input
+                  type="number"
+                  required
+                  min="1"
+                  max={myWalletBalance}
+                  placeholder={`Max ₹${myWalletBalance}`}
+                  value={payoutAmount}
+                  onChange={(e) => setPayoutAmount(e.target.value)}
+                  className="w-full px-4 py-2.5 bg-white border border-slate-300 rounded-xl text-base font-mono font-bold text-slate-900 focus:outline-none focus:border-emerald-500"
+                />
+              </div>
+
+              <div>
+                <label className="block text-xs font-bold text-slate-700 mb-1">
+                  Destination UPI ID *
+                </label>
+                <input
+                  type="text"
+                  required
+                  placeholder="e.g. yourname@oksbi"
+                  value={payoutUpi}
+                  onChange={(e) => setPayoutUpi(e.target.value)}
+                  className="w-full px-4 py-2.5 bg-white border border-slate-300 rounded-xl text-sm font-mono font-bold text-slate-900 focus:outline-none focus:border-emerald-500"
+                />
+              </div>
+
+              <div className="grid grid-cols-2 gap-2">
+                <div>
+                  <label className="block text-[11px] font-bold text-slate-700 mb-1">Bank Name</label>
+                  <input
+                    type="text"
+                    placeholder="SBI / HDFC"
+                    value={payoutBankName}
+                    onChange={(e) => setPayoutBankName(e.target.value)}
+                    className="w-full px-3 py-2 bg-white border border-slate-300 rounded-xl text-xs text-slate-900 focus:outline-none focus:border-emerald-500"
+                  />
+                </div>
+                <div>
+                  <label className="block text-[11px] font-bold text-slate-700 mb-1">Account No</label>
+                  <input
+                    type="text"
+                    placeholder="A/C No"
+                    value={payoutAccountNo}
+                    onChange={(e) => setPayoutAccountNo(e.target.value)}
+                    className="w-full px-3 py-2 bg-white border border-slate-300 rounded-xl text-xs text-slate-900 focus:outline-none focus:border-emerald-500"
+                  />
+                </div>
+              </div>
+
+              <div className="pt-3 border-t border-slate-100 flex items-center justify-end gap-2">
+                <button
+                  type="button"
+                  onClick={() => setShowPayoutModal(false)}
+                  className="px-4 py-2 text-xs font-bold text-slate-600 hover:text-slate-800"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  className="px-6 py-2.5 bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-black rounded-xl transition flex items-center gap-1.5 shadow-sm"
+                >
+                  <Send className="w-3.5 h-3.5" /> Submit Withdrawal
+                </button>
+              </div>
+            </form>
           </div>
         </div>
       )}
