@@ -36,6 +36,7 @@ export interface UserProfile extends LocalAddressFields {
   full_name?: string;
   email: string;
   phone?: string;
+  whatsapp?: string;
   avatar_url?: string;
   google_id?: string;
   city?: string;

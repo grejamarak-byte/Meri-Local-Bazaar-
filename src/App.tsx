@@ -2030,8 +2030,121 @@ export function App() {
     }
   };
 
+  const handleUpdateWalletBalance = async (userId: string, newBalance: number) => {
+    const updatedTimestamp = new Date().toISOString();
+    const validUserId = ensureUuid(userId);
+    setWallets((prev) => {
+      const exists = prev.some((w) => w.user_id === userId || w.user_id === validUserId);
+      if (exists) {
+        return prev.map((w) =>
+          w.user_id === userId || w.user_id === validUserId
+            ? { ...w, balance: newBalance, updated_at: updatedTimestamp }
+            : w
+        );
+      }
+      return [
+        ...prev,
+        {
+          id: generateUuid(),
+          user_id: validUserId,
+          balance: newBalance,
+          updated_at: updatedTimestamp,
+        },
+      ];
+    });
+
+    if (supabase) {
+      try {
+        await supabase
+          .from('wallets')
+          .upsert(
+            { user_id: validUserId, balance: newBalance, updated_at: updatedTimestamp },
+            { onConflict: 'user_id' }
+          );
+      } catch (err) {
+        console.warn('Supabase wallet update:', err);
+      }
+    }
+  };
+
   const handleApprovePayout = async (id: string) => {
+    const targetReq = payoutRequests.find((p) => p.id === id);
     const completedTimestamp = new Date().toISOString();
+    const txnId = `TXN-${Date.now().toString().slice(-8)}`;
+
+    if (targetReq) {
+      const userId = targetReq.user_id;
+      const validUserId = ensureUuid(userId);
+      const amount = Number(targetReq.amount) || 0;
+
+      // Deduct from wallet if needed
+      setWallets((prev) => {
+        const currentWallet = prev.find((w) => w.user_id === userId || w.user_id === validUserId);
+        const currentBal = currentWallet ? Number(currentWallet.balance) || 0 : 0;
+        const newBal = Math.max(0, currentBal - amount);
+        const exists = prev.some((w) => w.user_id === userId || w.user_id === validUserId);
+        if (exists) {
+          return prev.map((w) =>
+            w.user_id === userId || w.user_id === validUserId
+              ? { ...w, balance: newBal, updated_at: completedTimestamp }
+              : w
+          );
+        }
+        return [
+          ...prev,
+          {
+            id: generateUuid(),
+            user_id: validUserId,
+            balance: newBal,
+            updated_at: completedTimestamp,
+          },
+        ];
+      });
+
+      // Add payout log
+      const newLog: PayoutLog = {
+        id: generateUuid(),
+        user_id: validUserId,
+        amount,
+        status: 'paid',
+        payout_upi: targetReq.upi_id || '',
+        transaction_id: txnId,
+        created_at: completedTimestamp,
+        user_name: targetReq.user_name || 'Partner',
+        user_phone: targetReq.user_phone || '',
+        role: targetReq.user_role || 'Partner',
+      };
+      setPayoutLogs((prev) => [newLog, ...prev]);
+
+      if (supabase) {
+        try {
+          const currentWallet = wallets.find((w) => w.user_id === userId || w.user_id === validUserId);
+          const currentBal = currentWallet ? Number(currentWallet.balance) || 0 : 0;
+          const newBal = Math.max(0, currentBal - amount);
+          await supabase
+            .from('wallets')
+            .upsert(
+              { user_id: validUserId, balance: newBal, updated_at: completedTimestamp },
+              { onConflict: 'user_id' }
+            );
+
+          await supabase.from('payout_logs').insert([
+            {
+              id: newLog.id,
+              user_id: validUserId,
+              amount,
+              status: 'paid',
+              payout_upi: targetReq.upi_id || '',
+              transaction_id: txnId,
+              created_at: completedTimestamp,
+            },
+          ]);
+        } catch (err) {
+          console.warn('Supabase approve payout balance update:', err);
+        }
+      }
+    }
+
     setPayoutRequests((prev) =>
       prev.map((p) =>
         p.id === id ? { ...p, status: 'completed', completed_at: completedTimestamp } : p
@@ -2804,6 +2917,7 @@ export function App() {
             onToggleProfileApproval={handleToggleProfileApproval}
             onApprovePayout={handleApprovePayout}
             onRejectPayout={handleRejectPayout}
+            onUpdateWalletBalance={handleUpdateWalletBalance}
           />
         </main>
 

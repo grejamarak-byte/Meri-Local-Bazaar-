@@ -115,6 +115,7 @@ interface AdminControlRoomProps {
     userName?: string,
     userPhone?: string
   ) => Promise<void> | void;
+  onUpdateWalletBalance?: (userId: string, newBalance: number) => Promise<void> | void;
 }
 
 export const AdminControlRoom: React.FC<AdminControlRoomProps> = ({
@@ -154,6 +155,7 @@ export const AdminControlRoom: React.FC<AdminControlRoomProps> = ({
   onApprovePayout,
   onRejectPayout,
   onProcessPayout,
+  onUpdateWalletBalance,
 }) => {
   const [adminTab, setAdminTab] = useState<
     | 'listings'
@@ -176,7 +178,7 @@ export const AdminControlRoom: React.FC<AdminControlRoomProps> = ({
   const [regSearch, setRegSearch] = useState('');
   const [orderSearch, setOrderSearch] = useState('');
   const [inspectDocUrl, setInspectDocUrl] = useState<string | null>(null);
-  const [userRoleFilter, setUserRoleFilter] = useState<'all' | 'users' | 'delivery_partners' | 'admins'>('all');
+  const [userRoleFilter, setUserRoleFilter] = useState<'all' | 'users' | 'admins'>('all');
   const [userSearch, setUserSearch] = useState('');
   const [serviceFilter, setServiceFilter] = useState<'all' | 'pending' | 'approved' | 'rejected'>('pending');
   const [serviceSearch, setServiceSearch] = useState('');
@@ -186,20 +188,60 @@ export const AdminControlRoom: React.FC<AdminControlRoomProps> = ({
 
   // Inline Payout Processing States
   const [payoutInputs, setPayoutInputs] = useState<Record<string, string>>({});
+  const [balanceInputs, setBalanceInputs] = useState<Record<string, string>>({});
+  const [adjustingBalanceKey, setAdjustingBalanceKey] = useState<string | null>(null);
   const [processingPayoutKey, setProcessingPayoutKey] = useState<string | null>(null);
   const [payoutSuccessMsg, setPayoutSuccessMsg] = useState<string | null>(null);
 
-  // Helper for wallet balance
-  const getUserWalletBalance = (userId?: string): number => {
+  // Helper for wallet balance with robust multi-field lookup
+  const getUserWalletBalance = (userId?: string, userPhone?: string): number => {
     if (userId) {
       const w = wallets.find((wal) => wal.user_id === userId);
       if (w) return Number(w.balance) || 0;
+    }
+    if (userPhone) {
+      const cleanPhone = userPhone.replace(/\D/g, '');
+      const matchedProfile = profiles.find((p) => {
+        const pPhone = (p.phone || '').replace(/\D/g, '');
+        const pWa = (p.whatsapp || '').replace(/\D/g, '');
+        return pPhone.includes(cleanPhone) || pWa.includes(cleanPhone);
+      });
+      if (matchedProfile) {
+        const w = wallets.find((wal) => wal.user_id === matchedProfile.id);
+        if (w) return Number(w.balance) || 0;
+      }
     }
     if (userId === 'usr_seller2') return 3200;
     if (userId === 'usr_seller3') return 1850;
     if (userId === 'usr_me1') return 2300;
     if (userId === 'usr_rider4') return 1200;
     return 0;
+  };
+
+  const handleAdjustBalance = async (
+    userId: string,
+    targetKey: string,
+    userName: string
+  ) => {
+    const entered = balanceInputs[targetKey];
+    const newBal = parseFloat(entered || '');
+    if (isNaN(newBal) || newBal < 0) {
+      alert('Please enter a valid positive balance number (e.g. 1500)');
+      return;
+    }
+    setAdjustingBalanceKey(targetKey);
+    try {
+      if (onUpdateWalletBalance) {
+        await onUpdateWalletBalance(userId, newBal);
+      }
+      setBalanceInputs((prev) => ({ ...prev, [targetKey]: '' }));
+      setPayoutSuccessMsg(`Wallet balance updated to ₹${formatPrice(newBal)} for ${userName}!`);
+      setTimeout(() => setPayoutSuccessMsg(null), 4000);
+    } catch (err: any) {
+      alert('Failed to update wallet balance: ' + (err?.message || err));
+    } finally {
+      setAdjustingBalanceKey(null);
+    }
   };
 
   const handleCardPayout = async (
@@ -506,31 +548,21 @@ export const AdminControlRoom: React.FC<AdminControlRoomProps> = ({
 
   // Filtered Profiles
   const filteredProfiles = profiles.filter((p) => {
-    if (
-      userRoleFilter === 'users' &&
-      (p.role === 'admin' ||
-        p.role === 'super_admin' ||
-        p.role === 'delivery_partner' ||
-        p.is_delivery_partner)
-    )
-      return false;
-    if (userRoleFilter === 'admins' && p.role !== 'admin' && p.role !== 'super_admin') return false;
-    if (
-      userRoleFilter === 'delivery_partners' &&
-      p.role !== 'delivery_partner' &&
-      !p.is_delivery_partner &&
-      !p.vehicle_number &&
-      !p.partner_status
-    )
-      return false;
+    if (userRoleFilter === 'users') {
+      if (p.role === 'admin' || p.role === 'super_admin') return false;
+    }
+    if (userRoleFilter === 'admins') {
+      if (p.role !== 'admin' && p.role !== 'super_admin') return false;
+    }
 
     const q = userSearch.toLowerCase();
     return (
+      !q ||
       (p.full_name && p.full_name.toLowerCase().includes(q)) ||
       (p.email && p.email.toLowerCase().includes(q)) ||
       (p.phone && p.phone.includes(q)) ||
+      (p.shop_name && p.shop_name.toLowerCase().includes(q)) ||
       (p.vehicle_number && p.vehicle_number.toLowerCase().includes(q)) ||
-      (p.vehicle_type && p.vehicle_type.toLowerCase().includes(q)) ||
       (p.payout_upi_id && p.payout_upi_id.toLowerCase().includes(q))
     );
   });
@@ -2273,36 +2305,38 @@ export const AdminControlRoom: React.FC<AdminControlRoomProps> = ({
       )}
 
       {/* ========================================================================= */}
-      {/* TAB 4: PARTNERS & USERS DIRECTORY */}
+      {/* TAB 4: USERS & SELLERS ACCOUNTS DIRECTORY */}
       {/* ========================================================================= */}
       {adminTab === 'members' && (
         <div className="bg-white rounded-3xl border border-slate-200 p-6 sm:p-8 shadow-sm space-y-6">
           <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 border-b border-slate-100 pb-4">
             <div>
-              <h3 className="text-lg font-black text-slate-900">
-                Community Members & Delivery Partner Fleet Directory
+              <div className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-orange-100 text-orange-800 text-[11px] font-bold uppercase tracking-wider mb-1.5">
+                <Users className="w-3.5 h-3.5 text-orange-600" /> User Accounts & Balances
+              </div>
+              <h3 className="text-xl font-black text-slate-900">
+                Community Members & Merchants Directory
               </h3>
               <p className="text-xs text-slate-500 mt-0.5">
-                Inspect registered users, riders, bank payout UPI accounts, and assign permissions.
+                Inspect registered users, shop sellers, live wallet balances, UPI payout destinations, and adjust user balances or roles.
               </p>
             </div>
 
-            <div className="flex gap-1 bg-slate-100 p-1 rounded-xl">
+            <div className="flex gap-1.5 bg-slate-100 p-1.5 rounded-2xl flex-wrap">
               {(
                 [
-                  { id: 'all', label: 'All' },
-                  { id: 'delivery_partners', label: 'Delivery Fleet' },
-                  { id: 'users', label: 'Users' },
+                  { id: 'all', label: `All Accounts (${profiles.length})` },
+                  { id: 'users', label: 'Members & Sellers' },
                   { id: 'admins', label: 'Admins' },
                 ] as const
               ).map((f) => (
                 <button
                   key={f.id}
                   onClick={() => setUserRoleFilter(f.id)}
-                  className={`px-3 py-1.5 rounded-lg text-xs font-bold transition ${
+                  className={`px-3.5 py-1.5 rounded-xl text-xs font-bold transition cursor-pointer ${
                     userRoleFilter === f.id
                       ? 'bg-slate-900 text-white shadow-xs'
-                      : 'text-slate-600 hover:text-slate-900'
+                      : 'text-slate-600 hover:text-slate-900 hover:bg-slate-200/60'
                   }`}
                 >
                   {f.label}
@@ -2311,242 +2345,197 @@ export const AdminControlRoom: React.FC<AdminControlRoomProps> = ({
             </div>
           </div>
 
+          {/* Search bar */}
+          <div className="flex items-center justify-between gap-3 bg-slate-50 p-3 rounded-2xl border border-slate-200/80">
+            <div className="relative w-full sm:w-80">
+              <Search className="w-4 h-4 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2" />
+              <input
+                type="text"
+                value={userSearch}
+                onChange={(e) => setUserSearch(e.target.value)}
+                placeholder="Search by name, phone, shop, UPI, email..."
+                className="w-full bg-white border border-slate-200 rounded-xl pl-9 pr-3 py-1.5 text-xs text-slate-900 placeholder:text-slate-400 focus:outline-none focus:ring-2 focus:ring-orange-500"
+              />
+            </div>
+            <div className="text-xs font-bold text-slate-500">
+              Showing {filteredProfiles.length} of {profiles.length} accounts
+            </div>
+          </div>
+
           <div className="space-y-4">
-            {filteredProfiles.map((p) => {
-              const isPartner = p.is_delivery_partner || p.role === 'delivery_partner';
-              const dlNumber = p.driving_license || p.driving_license_no;
-              const vehPlate = p.vehicle_number || p.vehicle_rc_no;
-              const isApproved = !!p.is_approved_by_admin;
+            {filteredProfiles.length === 0 ? (
+              <div className="p-12 text-center text-xs text-slate-400 bg-slate-50 rounded-2xl border border-dashed border-slate-200">
+                No accounts match your current filter or search.
+              </div>
+            ) : (
+              filteredProfiles.map((p) => {
+                const targetKey = `user_bal_${p.id}`;
+                const userBalance = getUserWalletBalance(p.id, p.phone);
+                const isAdjusting = adjustingBalanceKey === targetKey;
+                const isApproved = !!p.is_approved_by_admin;
 
-              return (
-                <div
-                  key={p.id}
-                  className="bg-slate-50/80 border border-slate-200 rounded-2xl p-4 sm:p-5 flex flex-col md:flex-row md:items-start justify-between gap-4"
-                >
-                  <div className="space-y-2 flex-1 min-w-0">
-                    <div className="flex items-center gap-2 flex-wrap">
-                      <span className="font-bold text-slate-900 text-base">
-                        {p.full_name || 'Anonymous User'}
-                      </span>
-                      {p.is_pro && (
-                        <span className="bg-emerald-600 text-white text-[10px] font-bold px-2 py-0.5 rounded-full flex items-center gap-1">
-                          <ShieldCheck className="w-3 h-3" /> PRO Member
+                return (
+                  <div
+                    key={p.id}
+                    className="bg-slate-50/80 border border-slate-200 rounded-2xl p-4 sm:p-5 flex flex-col xl:flex-row xl:items-center justify-between gap-4 hover:border-slate-300 transition shadow-2xs"
+                  >
+                    <div className="space-y-2 flex-1 min-w-0">
+                      <div className="flex items-center gap-2 flex-wrap">
+                        <span className="font-black text-slate-900 text-base">
+                          {p.full_name || 'Anonymous Member'}
                         </span>
-                      )}
-                      {isPartner && (
-                        <span className="bg-blue-100 text-blue-800 text-[10px] font-bold px-2 py-0.5 rounded-full flex items-center gap-1">
-                          <Truck className="w-3 h-3" /> Rider: {p.vehicle_type || 'Bike'} ({p.partner_status})
-                        </span>
-                      )}
-                      {p.shop_name && (
-                        <span className="bg-orange-100 text-orange-900 text-[10px] font-bold px-2 py-0.5 rounded-full flex items-center gap-1">
-                          <Store className="w-3 h-3" /> Shop: {p.shop_name}
-                        </span>
-                      )}
-                      {/* is_approved_by_admin Badge */}
-                      {isApproved ? (
-                        <span className="bg-emerald-100 text-emerald-900 border border-emerald-300 text-[10px] font-black px-2 py-0.5 rounded-full flex items-center gap-1">
-                          <CheckCircle2 className="w-3 h-3 text-emerald-600" /> Admin Approved
-                        </span>
-                      ) : (
-                        <span className="bg-amber-100 text-amber-900 border border-amber-300 text-[10px] font-bold px-2 py-0.5 rounded-full flex items-center gap-1">
-                          <Clock className="w-3 h-3 text-amber-600" /> Pending Admin Approval
-                        </span>
-                      )}
-                    </div>
-
-                    <div className="text-xs text-slate-600 grid grid-cols-1 sm:grid-cols-2 gap-x-4 gap-y-1 pt-1">
-                      <div>
-                        <strong>Phone:</strong> {p.phone || 'N/A'} • <strong>Email:</strong> {p.email || 'N/A'}
-                      </div>
-                      <div>
-                        <strong>Payout UPI:</strong>{' '}
-                        <span className="font-mono text-emerald-700 font-bold">
-                          {p.payout_upi_id || 'Not registered'}
-                        </span>
-                      </div>
-                      {dlNumber && (
-                        <div>
-                          <strong>Driving License:</strong>{' '}
-                          <span className="font-mono text-blue-700 font-bold">{dlNumber}</span>
-                        </div>
-                      )}
-                      {vehPlate && (
-                        <div>
-                          <strong>Vehicle / RC:</strong>{' '}
-                          <span className="font-mono text-slate-800 font-bold">{vehPlate}</span>{' '}
-                          {p.vehicle_model && <span>({p.vehicle_model})</span>}
-                        </div>
-                      )}
-                      {p.shop_name && (
-                        <div>
-                          <strong>Shop Details:</strong> {p.shop_name} • {p.shop_category || 'General'} • {p.shop_address || p.city_locality || 'Tura'}
-                        </div>
-                      )}
-                      {p.payout_bank_name && (
-                        <div>
-                          <strong>Bank:</strong> {p.payout_bank_name} • <strong>A/C:</strong>{' '}
-                          {p.payout_account_no} • <strong>IFSC:</strong> {p.payout_ifsc_code}
-                        </div>
-                      )}
-                    </div>
-
-                    {/* Rider Verification ID Proof Document Links */}
-                    {isPartner && (
-                      <div className="pt-2 mt-2 border-t border-slate-200/80 flex items-center gap-2.5 flex-wrap">
-                        <span className="text-[11px] font-black text-slate-700 flex items-center gap-1">
-                          <FileCheck className="w-3.5 h-3.5 text-blue-600" />
-                          Driver ID Verification:
-                        </span>
-
-                        {/* 1. Aadhaar Proof Link */}
-                        {(p.identity_url || p.aadhaar_url || p.aadhaar_proof_url || p.owner_id_proof_url) ? (
-                          <a
-                            href={p.identity_url || p.aadhaar_url || p.aadhaar_proof_url || p.owner_id_proof_url}
-                            target="_blank"
-                            rel="noopener noreferrer"
-                            className="inline-flex items-center gap-1.5 px-3 py-1 bg-amber-50 hover:bg-amber-100 text-amber-900 border border-amber-300 rounded-xl text-xs font-bold transition shadow-2xs hover:shadow-xs cursor-pointer"
-                            title="Open full-size Aadhaar proof in a new browser tab"
-                          >
-                            <FileText className="w-3.5 h-3.5 text-amber-700" />
-                            <span>View Aadhaar Proof</span>
-                            <ExternalLink className="w-3 h-3 text-amber-700 opacity-80" />
-                          </a>
-                        ) : p.aadhaar_number || p.owner_id_no ? (
-                          <span className="inline-flex items-center gap-1.5 px-3 py-1 bg-slate-100 text-slate-700 border border-slate-300 rounded-xl text-xs font-mono font-bold">
-                            <FileText className="w-3.5 h-3.5 text-slate-500" />
-                            Aadhaar: {p.aadhaar_number || p.owner_id_no}
-                          </span>
-                        ) : (
-                          <span className="inline-flex items-center gap-1 px-2.5 py-1 bg-slate-100 text-slate-400 border border-slate-200 rounded-xl text-[11px]">
-                            <FileText className="w-3 h-3 text-slate-400" />
-                            Aadhaar Not Uploaded
+                        {p.is_pro && (
+                          <span className="bg-emerald-600 text-white text-[10px] font-bold px-2.5 py-0.5 rounded-full flex items-center gap-1 shadow-2xs">
+                            <ShieldCheck className="w-3 h-3" /> PRO Member
                           </span>
                         )}
+                        {p.shop_name && (
+                          <span className="bg-orange-100 text-orange-900 border border-orange-200 text-[10px] font-bold px-2 py-0.5 rounded-full flex items-center gap-1">
+                            <Store className="w-3 h-3 text-orange-700" /> Shop: {p.shop_name}
+                          </span>
+                        )}
+                        <span className="bg-slate-200 text-slate-800 text-[10px] font-bold px-2 py-0.5 rounded-full uppercase">
+                          Role: {p.role || 'User'}
+                        </span>
 
-                        {/* 2. Driving License Link */}
-                        {(p.driving_license_url || p.driving_license_proof_url) ? (
-                          <a
-                            href={p.driving_license_url || p.driving_license_proof_url}
-                            target="_blank"
-                            rel="noopener noreferrer"
-                            className="inline-flex items-center gap-1.5 px-3 py-1 bg-blue-50 hover:bg-blue-100 text-blue-900 border border-blue-300 rounded-xl text-xs font-bold transition shadow-2xs hover:shadow-xs cursor-pointer"
-                            title="Open full-size Driving License in a new browser tab"
-                          >
-                            <FileCheck className="w-3.5 h-3.5 text-blue-700" />
-                            <span>View Driving License</span>
-                            <ExternalLink className="w-3 h-3 text-blue-700 opacity-80" />
-                          </a>
+                        {/* is_approved_by_admin Badge */}
+                        {isApproved ? (
+                          <span className="bg-emerald-100 text-emerald-900 border border-emerald-300 text-[10px] font-black px-2 py-0.5 rounded-full flex items-center gap-1">
+                            <CheckCircle2 className="w-3 h-3 text-emerald-600" /> Admin Approved
+                          </span>
                         ) : (
-                          <span className="inline-flex items-center gap-1 px-2.5 py-1 bg-slate-100 text-slate-400 border border-slate-200 rounded-xl text-[11px]">
-                            <FileCheck className="w-3 h-3 text-slate-400" />
-                            Driving License Not Uploaded
+                          <span className="bg-amber-100 text-amber-900 border border-amber-300 text-[10px] font-bold px-2 py-0.5 rounded-full flex items-center gap-1">
+                            <Clock className="w-3 h-3 text-amber-600" /> Pending Admin Approval
                           </span>
                         )}
                       </div>
-                    )}
-                  </div>
 
-                  <div className="flex items-center flex-wrap gap-2 shrink-0">
-                    {(p.driving_license_proof_url || p.owner_id_proof_url) && (
-                      <button
-                        onClick={() => setInspectDocUrl(p.driving_license_proof_url || p.owner_id_proof_url || null)}
-                        className="px-3 py-1.5 bg-white hover:bg-slate-100 border border-slate-300 rounded-xl text-xs font-bold text-slate-700 transition flex items-center gap-1"
-                      >
-                        <Eye className="w-3.5 h-3.5 text-blue-600" />
-                        Doc Proof
-                      </button>
-                    )}
-
-                    {/* Toggle is_approved_by_admin Button */}
-                    <button
-                      onClick={() => onToggleProfileApproval?.(p, !isApproved)}
-                      className={`px-3 py-1.5 rounded-xl text-xs font-black transition flex items-center gap-1 shadow-xs cursor-pointer ${
-                        isApproved
-                          ? 'bg-rose-50 hover:bg-rose-100 border border-rose-300 text-rose-700'
-                          : 'bg-emerald-600 hover:bg-emerald-700 text-white'
-                      }`}
-                      title={isApproved ? 'Click to revoke admin verification' : 'Click to grant official admin verified status'}
-                    >
-                      {isApproved ? (
-                        <>
-                          <XCircle className="w-3.5 h-3.5" />
-                          Revoke Approval
-                        </>
-                      ) : (
-                        <>
-                          <CheckCircle2 className="w-3.5 h-3.5" />
-                          Approve Profile
-                        </>
-                      )}
-                    </button>
-
-                    {/* Delivery Partner specific actions */}
-                    {isPartner && (
-                      p.partner_status === 'pending' ? (
-                        <>
-                          <button
-                            onClick={() =>
-                              onUpdateDeliveryPartner?.(
-                                p.id,
-                                true,
-                                'approved',
-                                p.vehicle_type,
-                                p.vehicle_number
-                              )
-                            }
-                            className="px-3 py-1.5 bg-blue-600 hover:bg-blue-700 text-white rounded-xl text-xs font-black transition flex items-center gap-1 shadow-xs"
-                          >
-                            <CheckCircle2 className="w-3.5 h-3.5" /> Accept & Approve Rider
-                          </button>
-                          <button
-                            onClick={() =>
-                              onUpdateDeliveryPartner?.(
-                                p.id,
-                                false,
-                                'rejected',
-                                p.vehicle_type,
-                                p.vehicle_number
-                              )
-                            }
-                            className="px-3 py-1.5 bg-red-600 hover:bg-red-700 text-white rounded-xl text-xs font-black transition flex items-center gap-1 shadow-xs"
-                          >
-                            <XCircle className="w-3.5 h-3.5" /> Reject Rider
-                          </button>
-                        </>
-                      ) : (
-                        <div className="flex items-center gap-1">
-                          <button
-                            onClick={() =>
-                              onUpdateDeliveryPartner?.(
-                                p.id,
-                                p.partner_status !== 'approved',
-                                p.partner_status === 'approved' ? 'suspended' : 'approved',
-                                p.vehicle_type,
-                                p.vehicle_number
-                              )
-                            }
-                            className={`px-2.5 py-1 rounded-xl text-xs font-bold transition ${
-                              p.partner_status === 'approved'
-                                ? 'bg-blue-100 text-blue-800 border border-blue-200'
-                                : 'bg-slate-100 text-slate-600 hover:bg-blue-50'
-                            }`}
-                          >
-                            {p.partner_status === 'approved' ? '✓ Rider Active' : 'Activate Rider'}
-                          </button>
+                      <div className="text-xs text-slate-600 grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-x-4 gap-y-1.5 pt-1">
+                        <div>
+                          <strong className="text-slate-800">Phone:</strong>{' '}
+                          <span className="font-mono font-semibold text-slate-900">{p.phone || 'N/A'}</span>
                         </div>
-                      )
-                    )}
-                    <button
-                      onClick={() => onToggleUserPro(p)}
-                      className="px-3 py-1.5 bg-white hover:bg-slate-100 border border-slate-300 rounded-xl text-xs font-bold text-slate-700 transition"
-                    >
-                      {p.is_pro ? 'Remove PRO' : 'Grant PRO'}
-                    </button>
+                        <div>
+                          <strong className="text-slate-800">Email:</strong> {p.email || 'N/A'}
+                        </div>
+                        <div className="flex items-center gap-1.5">
+                          <strong className="text-slate-800">Payout UPI:</strong>{' '}
+                          <span className="font-mono text-emerald-700 font-bold bg-emerald-50 px-1.5 py-0.5 rounded border border-emerald-200 select-all">
+                            {p.payout_upi_id || 'Not registered'}
+                          </span>
+                          {p.payout_upi_id && (
+                            <button
+                              onClick={() => {
+                                navigator.clipboard.writeText(p.payout_upi_id || '');
+                                setCopiedUpi(p.payout_upi_id || '');
+                                setTimeout(() => setCopiedUpi(null), 2000);
+                              }}
+                              className="text-slate-400 hover:text-emerald-700 cursor-pointer"
+                              title="Copy UPI"
+                            >
+                              {copiedUpi === p.payout_upi_id ? (
+                                <Check className="w-3.5 h-3.5 text-emerald-600" />
+                              ) : (
+                                <Copy className="w-3.5 h-3.5" />
+                              )}
+                            </button>
+                          )}
+                        </div>
+
+                        {/* Prominent Live Wallet Balance */}
+                        <div className="flex items-center gap-1.5 sm:col-span-2 lg:col-span-3 pt-1 border-t border-slate-200/60">
+                          <WalletIcon className="w-4 h-4 text-emerald-600 shrink-0" />
+                          <strong className="text-slate-900 font-bold">Wallet Balance:</strong>
+                          <span className="font-mono font-black text-emerald-700 bg-emerald-100 border border-emerald-300 px-2.5 py-0.5 rounded-lg text-sm shadow-2xs">
+                            ₹{formatPrice(userBalance)}
+                          </span>
+                          <span className="text-[11px] text-slate-400 ml-1">
+                            (Live available for instant withdrawal)
+                          </span>
+                        </div>
+
+                        {p.shop_name && (
+                          <div className="sm:col-span-2">
+                            <strong className="text-slate-800">Shop:</strong> {p.shop_name} • {p.shop_category || 'General'} • {p.shop_address || p.city_locality || 'Tura'}
+                          </div>
+                        )}
+                        {p.payout_bank_name && (
+                          <div className="sm:col-span-2">
+                            <strong className="text-slate-800">Bank:</strong> {p.payout_bank_name} • <strong>A/C:</strong>{' '}
+                            {p.payout_account_no} • <strong>IFSC:</strong> {p.payout_ifsc_code}
+                          </div>
+                        )}
+                      </div>
+                    </div>
+
+                    {/* Right Controls & Wallet Balance Adjustment Desk */}
+                    <div className="flex flex-col sm:flex-row xl:flex-col items-stretch sm:items-center xl:items-end gap-2.5 shrink-0 pt-3 xl:pt-0 border-t xl:border-t-0 border-slate-200">
+                      {/* Set / Adjust Balance Tool */}
+                      <div className="flex items-center gap-1.5 bg-white p-1.5 rounded-xl border border-slate-200 shadow-2xs">
+                        <span className="text-xs font-bold text-slate-500 pl-1.5">₹</span>
+                        <input
+                          type="number"
+                          placeholder="New Balance"
+                          value={balanceInputs[targetKey] || ''}
+                          onChange={(e) =>
+                            setBalanceInputs((prev) => ({ ...prev, [targetKey]: e.target.value }))
+                          }
+                          className="w-24 text-xs font-mono font-bold bg-transparent text-slate-900 focus:outline-none"
+                        />
+                        <button
+                          disabled={isAdjusting}
+                          onClick={() =>
+                            handleAdjustBalance(p.id, targetKey, p.full_name || 'Member')
+                          }
+                          className="px-2.5 py-1 bg-slate-900 hover:bg-black disabled:opacity-50 text-white rounded-lg text-xs font-bold transition flex items-center gap-1 shadow-2xs cursor-pointer"
+                          title="Set wallet balance directly in database"
+                        >
+                          <Banknote className="w-3 h-3 text-amber-400" />
+                          {isAdjusting ? 'Saving...' : 'Set Balance'}
+                        </button>
+                      </div>
+
+                      {/* Action Buttons */}
+                      <div className="flex items-center gap-1.5 flex-wrap">
+                        {/* Toggle is_approved_by_admin Button */}
+                        <button
+                          onClick={() => onToggleProfileApproval?.(p, !isApproved)}
+                          className={`px-3 py-1.5 rounded-xl text-xs font-black transition flex items-center gap-1 shadow-xs cursor-pointer ${
+                            isApproved
+                              ? 'bg-rose-50 hover:bg-rose-100 border border-rose-300 text-rose-700'
+                              : 'bg-emerald-600 hover:bg-emerald-700 text-white'
+                          }`}
+                          title={isApproved ? 'Click to revoke admin verification' : 'Click to grant official admin verified status'}
+                        >
+                          {isApproved ? (
+                            <>
+                              <XCircle className="w-3.5 h-3.5" />
+                              Revoke Approval
+                            </>
+                          ) : (
+                            <>
+                              <CheckCircle2 className="w-3.5 h-3.5" />
+                              Approve Account
+                            </>
+                          )}
+                        </button>
+
+                        <button
+                          onClick={() => onToggleUserPro(p)}
+                          className={`px-3 py-1.5 rounded-xl text-xs font-bold transition cursor-pointer ${
+                            p.is_pro
+                              ? 'bg-amber-100 text-amber-900 border border-amber-300'
+                              : 'bg-white hover:bg-slate-100 border border-slate-300 text-slate-700'
+                          }`}
+                        >
+                          {p.is_pro ? 'Remove PRO' : 'Grant PRO'}
+                        </button>
+                      </div>
+                    </div>
                   </div>
-                </div>
-              );
-            })}
+                );
+              })
+            )}
           </div>
         </div>
       )}
@@ -3192,6 +3181,9 @@ export const AdminControlRoom: React.FC<AdminControlRoomProps> = ({
                                   hour: '2-digit',
                                   minute: '2-digit',
                                 })}
+                              </span>
+                              <span className="flex items-center gap-1 bg-emerald-100/80 text-emerald-800 font-bold px-2.5 py-0.5 rounded-lg text-xs border border-emerald-200">
+                                <WalletIcon className="w-3.5 h-3.5 text-emerald-600" /> Current Wallet: ₹{formatPrice(getUserWalletBalance(req.user_id, req.user_phone))}
                               </span>
                             </div>
                           </div>
