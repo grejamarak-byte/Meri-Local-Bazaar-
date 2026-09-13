@@ -12,6 +12,7 @@ import {
   Store,
   Mail,
   AlertCircle,
+  ShieldAlert,
 } from 'lucide-react';
 import { UserProfile } from '../types';
 import { supabase } from '../lib/supabase';
