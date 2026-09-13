@@ -625,6 +625,26 @@ export interface CartItem {
   listing?: Listing;
 }
 
+export interface Wallet {
+  id: string;
+  user_id: string;
+  balance: number;
+  updated_at?: string;
+}
+
+export interface PayoutLog {
+  id: string;
+  user_id: string;
+  amount: number;
+  status: 'pending' | 'paid';
+  payout_upi?: string;
+  transaction_id?: string;
+  created_at?: string;
+  user_name?: string;
+  user_phone?: string;
+  role?: string;
+}
+
 export function isMasterAdmin(user?: UserProfile | null): boolean {
   if (!user || !user.email) return false;
   const em = user.email.toLowerCase().trim();

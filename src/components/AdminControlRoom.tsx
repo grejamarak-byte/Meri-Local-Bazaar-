@@ -38,6 +38,11 @@ import {
   Megaphone,
   X,
   Tag,
+  Wallet as WalletIcon,
+  Send,
+  ArrowUpRight,
+  Check,
+  Banknote,
 } from 'lucide-react';
 import {
   Listing,
@@ -50,6 +55,8 @@ import {
   DeliveryOrder,
   BannerAd,
   PayoutRequest,
+  Wallet,
+  PayoutLog,
   formatPrice,
   getListingPrimaryImage,
   getListingImages,
@@ -69,6 +76,8 @@ interface AdminControlRoomProps {
   deliveryOrders?: DeliveryOrder[];
   bannerAds?: BannerAd[];
   payoutRequests?: PayoutRequest[];
+  wallets?: Wallet[];
+  payoutLogs?: PayoutLog[];
   onRefresh: () => void;
   onViewListing: (listing: Listing) => void;
   onUpdateListingStatus: (id: string, status: string, isFeatured?: boolean, isPro?: boolean) => void;
@@ -97,7 +106,15 @@ interface AdminControlRoomProps {
   onToggleBannerAd?: (id: string, currentStatus: boolean) => Promise<void> | void;
   onToggleProfileApproval?: (profile: UserProfile, approved: boolean) => void;
   onApprovePayout?: (id: string) => Promise<void> | void;
-  onRejectPayout?: (id: string, reason?: string) => Promise<void> | void;
+  onRejectPayout?: (id: string, reason?: string) => void | Promise<void>;
+  onProcessPayout?: (
+    userId: string,
+    amount: number,
+    payoutUpi?: string,
+    role?: string,
+    userName?: string,
+    userPhone?: string
+  ) => Promise<void> | void;
 }
 
 export const AdminControlRoom: React.FC<AdminControlRoomProps> = ({
@@ -111,6 +128,8 @@ export const AdminControlRoom: React.FC<AdminControlRoomProps> = ({
   deliveryOrders = [],
   bannerAds = [],
   payoutRequests = [],
+  wallets = [],
+  payoutLogs = [],
   onRefresh,
   onViewListing,
   onUpdateListingStatus,
@@ -134,6 +153,7 @@ export const AdminControlRoom: React.FC<AdminControlRoomProps> = ({
   onToggleProfileApproval,
   onApprovePayout,
   onRejectPayout,
+  onProcessPayout,
 }) => {
   const [adminTab, setAdminTab] = useState<
     | 'listings'
@@ -152,7 +172,7 @@ export const AdminControlRoom: React.FC<AdminControlRoomProps> = ({
   >('pending_verification');
   const [rechargeFilter, setRechargeFilter] = useState<'all' | 'pending' | 'approved' | 'rejected'>('pending');
   const [regFilter, setRegFilter] = useState<'all' | 'pending' | 'approved' | 'rejected'>('pending');
-  const [regTypeFilter, setRegTypeFilter] = useState<'all' | 'shops' | 'vehicles'>('all');
+  const [regTypeFilter, setRegTypeFilter] = useState<'all' | 'shops' | 'vehicles' | 'delivery_fleet'>('all');
   const [regSearch, setRegSearch] = useState('');
   const [orderSearch, setOrderSearch] = useState('');
   const [inspectDocUrl, setInspectDocUrl] = useState<string | null>(null);
@@ -163,6 +183,53 @@ export const AdminControlRoom: React.FC<AdminControlRoomProps> = ({
   const [payoutFilter, setPayoutFilter] = useState<'all' | 'pending' | 'completed' | 'rejected'>('pending');
   const [payoutSearch, setPayoutSearch] = useState('');
   const [copiedUpi, setCopiedUpi] = useState<string | null>(null);
+
+  // Inline Payout Processing States
+  const [payoutInputs, setPayoutInputs] = useState<Record<string, string>>({});
+  const [processingPayoutKey, setProcessingPayoutKey] = useState<string | null>(null);
+  const [payoutSuccessMsg, setPayoutSuccessMsg] = useState<string | null>(null);
+
+  // Helper for wallet balance
+  const getUserWalletBalance = (userId?: string): number => {
+    if (userId) {
+      const w = wallets.find((wal) => wal.user_id === userId);
+      if (w) return Number(w.balance) || 0;
+    }
+    if (userId === 'usr_seller2') return 3200;
+    if (userId === 'usr_seller3') return 1850;
+    if (userId === 'usr_me1') return 2300;
+    if (userId === 'usr_rider4') return 1200;
+    return 0;
+  };
+
+  const handleCardPayout = async (
+    userId: string,
+    targetKey: string,
+    defaultUpi: string | undefined,
+    role: string,
+    userName: string,
+    userPhone: string
+  ) => {
+    const entered = payoutInputs[targetKey];
+    const amount = parseFloat(entered || '');
+    if (!amount || isNaN(amount) || amount <= 0) {
+      alert('Please enter a valid payout amount (e.g. 500)');
+      return;
+    }
+    setProcessingPayoutKey(targetKey);
+    try {
+      if (onProcessPayout) {
+        await onProcessPayout(userId, amount, defaultUpi, role, userName, userPhone);
+      }
+      setPayoutInputs((prev) => ({ ...prev, [targetKey]: '' }));
+      setPayoutSuccessMsg(`Payout of ₹${formatPrice(amount)} successfully processed & logged for ${userName}!`);
+      setTimeout(() => setPayoutSuccessMsg(null), 4000);
+    } catch (err: any) {
+      alert('Failed to process payout: ' + (err?.message || err));
+    } finally {
+      setProcessingPayoutKey(null);
+    }
+  };
 
   // Local settings editor state
   const upiSetting =
@@ -193,8 +260,154 @@ export const AdminControlRoom: React.FC<AdminControlRoomProps> = ({
   ).length;
   const pendingRechargesCount = rechargeRequests.filter((r) => r.status === 'pending').length;
   const pendingShopsCount = shopRegistrations.filter((s) => s.status === 'pending').length;
-  const pendingVehiclesCount = vehicleRegistrations.filter((v) => v.status === 'pending').length;
-  const totalPendingRegistrations = pendingShopsCount + pendingVehiclesCount;
+
+  // 1. SHOPS / SELLERS Filtering
+  const filteredShops = shopRegistrations.filter((s) => {
+    if (regFilter !== 'all' && s.status !== regFilter) return false;
+    if (regSearch) {
+      const q = regSearch.toLowerCase();
+      return (
+        s.shop_name?.toLowerCase().includes(q) ||
+        s.owner_name?.toLowerCase().includes(q) ||
+        s.shop_id_no?.toLowerCase().includes(q) ||
+        s.user_phone?.includes(q) ||
+        s.category?.toLowerCase().includes(q) ||
+        s.shop_address?.toLowerCase().includes(q)
+      );
+    }
+    return true;
+  });
+
+  // 2. CAB & TAXI DRIVERS (Strictly cab/taxi/traveler/auto, excluding delivery boys)
+  const cabAndTaxiList = vehicleRegistrations.filter((v) => {
+    const isDelivery =
+      (v as any).is_delivery_boy === true ||
+      (v as any).is_delivery_partner === true ||
+      v.vehicle_type?.toLowerCase().includes('delivery') ||
+      (v as any).service_type === 'delivery';
+    return !isDelivery;
+  });
+
+  const pendingVehiclesCount = cabAndTaxiList.filter((v) => v.status === 'pending').length;
+
+  const filteredVehicles = cabAndTaxiList.filter((v) => {
+    if (regFilter !== 'all' && v.status !== regFilter) return false;
+    if (regSearch) {
+      const q = regSearch.toLowerCase();
+      const vehNo = (v.vehicle_reg_no || v.vehicle_number || '').toLowerCase();
+      const driverName = (v.driver_name || '').toLowerCase();
+      const dlNo = (v.driving_license_no || '').toLowerCase();
+      const phone = (v.driver_phone || '').toLowerCase();
+      const model = (v.vehicle_model || v.vehicle_type || '').toLowerCase();
+      const route = (v.operational_route || '').toLowerCase();
+      return (
+        vehNo.includes(q) ||
+        driverName.includes(q) ||
+        dlNo.includes(q) ||
+        phone.includes(q) ||
+        model.includes(q) ||
+        route.includes(q)
+      );
+    }
+    return true;
+  });
+
+  // 3. DELIVERY BOYS / FLEET Filtering
+  const deliveryFleetMap = new Map<
+    string,
+    {
+      id: string;
+      user_id: string;
+      full_name: string;
+      phone: string;
+      vehicle_type: string;
+      vehicle_number: string;
+      payout_upi: string;
+      driving_license_no?: string;
+      driving_license_proof_url?: string;
+      status: string;
+      created_at?: string;
+      is_approved?: boolean;
+      source: 'service_reg' | 'profile' | 'vehicle_reg';
+    }
+  >();
+
+  // Extract from service_registrations
+  serviceRegistrations.forEach((s) => {
+    const isDelivery =
+      s.service_type === 'driver' ||
+      (s as any).is_delivery_boy === true ||
+      (s as any).is_delivery_partner === true ||
+      s.category?.toLowerCase().includes('delivery');
+    if (isDelivery) {
+      const uid = s.user_id || s.id;
+      deliveryFleetMap.set(uid, {
+        id: s.id,
+        user_id: s.user_id || `usr_rider_${s.id}`,
+        full_name: s.full_name || 'Delivery Partner',
+        phone: s.phone || '',
+        vehicle_type: (s as any).vehicle_type || 'Bike / Scooty',
+        vehicle_number: (s as any).vehicle_number || 'Registered Delivery Bike',
+        payout_upi: (s as any).payout_upi || s.payout_upi_id || '',
+        driving_license_no: s.aadhaar_or_voter_no || (s as any).driving_license_no,
+        driving_license_proof_url: (s as any).driving_license_proof_url || s.id_proof_url,
+        status: s.status || (s.is_approved ? 'approved' : 'pending'),
+        created_at: s.created_at,
+        is_approved: s.is_approved,
+        source: 'service_reg',
+      });
+    }
+  });
+
+  // Extract from profiles
+  profiles.forEach((p) => {
+    if (p.is_delivery_partner || p.role === 'delivery_partner') {
+      if (!deliveryFleetMap.has(p.id)) {
+        deliveryFleetMap.set(p.id, {
+          id: `fleet_prof_${p.id}`,
+          user_id: p.id,
+          full_name: p.full_name || 'Delivery Rider',
+          phone: p.phone || '',
+          vehicle_type: p.vehicle_type || 'Motorcycle / Bike',
+          vehicle_number: p.vehicle_number || p.vehicle_rc_no || 'ML-08-FLEET',
+          payout_upi: p.payout_upi_id || '',
+          driving_license_no: p.driving_license || p.driving_license_no,
+          driving_license_proof_url: p.driving_license_proof_url,
+          status: p.partner_status === 'active' || p.is_approved_by_admin ? 'approved' : 'pending',
+          is_approved: p.is_approved_by_admin,
+          source: 'profile',
+        });
+      }
+    }
+  });
+
+  const allDeliveryFleet = Array.from(deliveryFleetMap.values());
+  const pendingDeliveryFleetCount = allDeliveryFleet.filter(
+    (d) => d.status === 'pending' || !d.is_approved
+  ).length;
+
+  const filteredDeliveryFleet = allDeliveryFleet.filter((d) => {
+    if (regFilter !== 'all') {
+      if (regFilter === 'pending' && d.status !== 'pending' && d.is_approved) return false;
+      if (regFilter === 'approved' && d.status !== 'approved' && !d.is_approved) return false;
+      if (regFilter === 'rejected' && d.status !== 'rejected') return false;
+    }
+    if (regSearch) {
+      const q = regSearch.toLowerCase();
+      return (
+        d.full_name.toLowerCase().includes(q) ||
+        d.phone.includes(q) ||
+        d.vehicle_number.toLowerCase().includes(q) ||
+        d.vehicle_type.toLowerCase().includes(q) ||
+        d.payout_upi.toLowerCase().includes(q) ||
+        (d.driving_license_no && d.driving_license_no.toLowerCase().includes(q))
+      );
+    }
+    return true;
+  });
+
+  const totalPendingRegistrations =
+    pendingShopsCount + pendingVehiclesCount + pendingDeliveryFleetCount;
   const pendingServicesCount = serviceRegistrations.filter(
     (s) => !s.is_approved && s.status !== 'rejected'
   ).length;
@@ -289,41 +502,6 @@ export const AdminControlRoom: React.FC<AdminControlRoomProps> = ({
   const filteredRecharges = rechargeRequests.filter((r) => {
     if (rechargeFilter === 'all') return true;
     return r.status === rechargeFilter;
-  });
-
-  // Filtered Registrations (Shops & Vehicles)
-  const filteredShops = shopRegistrations.filter((s) => {
-    if (regFilter !== 'all' && s.status !== regFilter) return false;
-    if (regSearch) {
-      const q = regSearch.toLowerCase();
-      return (
-        s.shop_name.toLowerCase().includes(q) ||
-        s.owner_name.toLowerCase().includes(q) ||
-        s.shop_id_no.toLowerCase().includes(q) ||
-        s.user_phone.includes(q)
-      );
-    }
-    return true;
-  });
-
-  const filteredVehicles = vehicleRegistrations.filter((v) => {
-    if (regFilter !== 'all' && v.status !== regFilter) return false;
-    if (regSearch) {
-      const q = regSearch.toLowerCase();
-      const vehNo = (v.vehicle_reg_no || v.vehicle_number || '').toLowerCase();
-      const driverName = (v.driver_name || '').toLowerCase();
-      const dlNo = (v.driving_license_no || '').toLowerCase();
-      const phone = (v.driver_phone || '').toLowerCase();
-      const model = (v.vehicle_model || v.vehicle_type || '').toLowerCase();
-      return (
-        vehNo.includes(q) ||
-        driverName.includes(q) ||
-        dlNo.includes(q) ||
-        phone.includes(q) ||
-        model.includes(q)
-      );
-    }
-    return true;
   });
 
   // Filtered Profiles
@@ -972,259 +1150,726 @@ export const AdminControlRoom: React.FC<AdminControlRoomProps> = ({
       )}
 
       {/* ========================================================================= */}
-      {/* TAB 2: SHOPS & VEHICLE REGISTRATIONS */}
+      {/* TAB 2: SHOPS, CAB/TAXI & DELIVERY FLEET VERIFICATION REQUESTS */}
       {/* ========================================================================= */}
       {adminTab === 'registrations' && (
         <div className="bg-white rounded-3xl border border-slate-200 p-6 sm:p-8 shadow-sm space-y-6">
-          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 border-b border-slate-100 pb-4">
+          {/* Header & Sub-Tab Navigation */}
+          <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-4 border-b border-slate-100 pb-4">
             <div>
-              <h3 className="text-lg font-black text-slate-900">
-                Business & Fleet Verification Requests
+              <h3 className="text-lg font-black text-slate-900 flex items-center gap-2">
+                <FileCheck className="w-5 h-5 text-orange-600" />
+                <span>Business & Fleet Verification Requests</span>
               </h3>
               <p className="text-xs text-slate-500 mt-0.5">
-                Inspect Shop Trade Licenses, GSTIN, and Driver Driving Licenses (DL & RC).
+                Strictly separated directory for Shop Owners, Cab/Taxi Drivers, and Delivery Fleet Riders with Live Wallet & Payout Desk.
               </p>
             </div>
 
+            {/* 3 Distinct Category Tabs + All */}
             <div className="flex items-center gap-2 flex-wrap">
-              <div className="flex gap-1 bg-slate-100 p-1 rounded-xl">
+              <div className="flex gap-1 bg-slate-100 p-1.5 rounded-2xl flex-wrap">
+                <button
+                  onClick={() => setRegTypeFilter('shops')}
+                  className={`px-3 py-1.5 rounded-xl text-xs font-bold transition flex items-center gap-1.5 ${
+                    regTypeFilter === 'shops'
+                      ? 'bg-orange-600 text-white shadow-md'
+                      : 'text-slate-600 hover:text-slate-900 hover:bg-slate-200/60'
+                  }`}
+                >
+                  <Store className="w-3.5 h-3.5" />
+                  <span>1. Shops ({filteredShops.length})</span>
+                  {pendingShopsCount > 0 && (
+                    <span className="bg-amber-400 text-slate-950 font-black text-[10px] px-1.5 py-0.2 rounded-full">
+                      {pendingShopsCount}
+                    </span>
+                  )}
+                </button>
+
+                <button
+                  onClick={() => setRegTypeFilter('vehicles')}
+                  className={`px-3 py-1.5 rounded-xl text-xs font-bold transition flex items-center gap-1.5 ${
+                    regTypeFilter === 'vehicles'
+                      ? 'bg-blue-600 text-white shadow-md'
+                      : 'text-slate-600 hover:text-slate-900 hover:bg-slate-200/60'
+                  }`}
+                >
+                  <Car className="w-3.5 h-3.5" />
+                  <span>2. Vehicles / Taxi ({filteredVehicles.length})</span>
+                  {pendingVehiclesCount > 0 && (
+                    <span className="bg-amber-400 text-slate-950 font-black text-[10px] px-1.5 py-0.2 rounded-full">
+                      {pendingVehiclesCount}
+                    </span>
+                  )}
+                </button>
+
+                <button
+                  onClick={() => setRegTypeFilter('delivery_fleet')}
+                  className={`px-3 py-1.5 rounded-xl text-xs font-bold transition flex items-center gap-1.5 ${
+                    regTypeFilter === 'delivery_fleet'
+                      ? 'bg-emerald-600 text-white shadow-md'
+                      : 'text-slate-600 hover:text-slate-900 hover:bg-slate-200/60'
+                  }`}
+                >
+                  <Bike className="w-3.5 h-3.5" />
+                  <span>3. Delivery Fleet ({filteredDeliveryFleet.length})</span>
+                  {pendingDeliveryFleetCount > 0 && (
+                    <span className="bg-amber-400 text-slate-950 font-black text-[10px] px-1.5 py-0.2 rounded-full">
+                      {pendingDeliveryFleetCount}
+                    </span>
+                  )}
+                </button>
+
                 <button
                   onClick={() => setRegTypeFilter('all')}
-                  className={`px-3 py-1.5 rounded-lg text-xs font-bold transition ${
+                  className={`px-3 py-1.5 rounded-xl text-xs font-bold transition ${
                     regTypeFilter === 'all'
                       ? 'bg-slate-900 text-white shadow-xs'
                       : 'text-slate-600 hover:text-slate-900'
                   }`}
                 >
-                  All ({shopRegistrations.length + vehicleRegistrations.length})
-                </button>
-                <button
-                  onClick={() => setRegTypeFilter('shops')}
-                  className={`px-3 py-1.5 rounded-lg text-xs font-bold transition ${
-                    regTypeFilter === 'shops'
-                      ? 'bg-orange-600 text-white shadow-xs'
-                      : 'text-slate-600 hover:text-slate-900'
-                  }`}
-                >
-                  Shops ({shopRegistrations.length})
-                </button>
-                <button
-                  onClick={() => setRegTypeFilter('vehicles')}
-                  className={`px-3 py-1.5 rounded-lg text-xs font-bold transition ${
-                    regTypeFilter === 'vehicles'
-                      ? 'bg-blue-600 text-white shadow-xs'
-                      : 'text-slate-600 hover:text-slate-900'
-                  }`}
-                >
-                  Vehicles ({vehicleRegistrations.length})
+                  All ({filteredShops.length + filteredVehicles.length + filteredDeliveryFleet.length})
                 </button>
               </div>
             </div>
           </div>
 
-          {/* Registrations List */}
-          <div className="space-y-4">
-            {filteredShops.map((shop) => (
-              <div
-                key={shop.id}
-                className="bg-slate-50/80 border border-slate-200 rounded-2xl p-4 sm:p-5 flex flex-col md:flex-row md:items-center justify-between gap-4 hover:border-slate-300 transition"
-              >
-                <div className="flex items-start gap-3.5 flex-1 min-w-0">
-                  <div className="flex-1 min-w-0 space-y-1">
-                    <div className="flex items-center gap-2 flex-wrap">
-                      <span className="font-bold text-slate-900 text-base">{shop.shop_name}</span>
-                      <span className="bg-orange-100 text-orange-800 text-[10px] font-bold px-2 py-0.5 rounded-full">
-                        Shop: {shop.category}
-                      </span>
-                      <span
-                        className={`text-[10px] font-black uppercase px-2 py-0.5 rounded-full ${
-                          shop.status === 'approved'
-                            ? 'bg-emerald-100 text-emerald-800'
-                            : shop.status === 'rejected'
-                            ? 'bg-red-100 text-red-800'
-                            : 'bg-amber-100 text-amber-800'
-                        }`}
-                      >
-                        {shop.status}
-                      </span>
-                    </div>
+          {/* Status Filter & Search Bar */}
+          <div className="flex flex-col sm:flex-row items-center justify-between gap-3 bg-slate-50 p-3 rounded-2xl border border-slate-200/80">
+            <div className="flex items-center gap-1.5 w-full sm:w-auto">
+              {(['all', 'pending', 'approved', 'rejected'] as const).map((st) => (
+                <button
+                  key={st}
+                  onClick={() => setRegFilter(st)}
+                  className={`px-3 py-1 rounded-lg text-xs font-bold uppercase transition ${
+                    regFilter === st
+                      ? 'bg-white text-slate-900 shadow-xs border border-slate-200'
+                      : 'text-slate-500 hover:text-slate-900'
+                  }`}
+                >
+                  {st}
+                </button>
+              ))}
+            </div>
 
-                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 text-xs text-slate-600 pt-1">
-                      <div>
-                        <strong>License ({shop.shop_id_proof_type}):</strong>{' '}
-                        <span className="font-mono text-orange-700 font-bold">{shop.shop_id_no}</span>
-                      </div>
-                      <div>
-                        <strong>Owner ({shop.owner_id_type}):</strong>{' '}
-                        <span>{shop.owner_name}</span> ({shop.user_phone})
-                      </div>
-                      <div>
-                        <strong>Address:</strong> <span>{shop.shop_address}</span>
-                      </div>
-                      <div>
-                        <strong>Payout UPI:</strong>{' '}
-                        <span className="font-mono text-emerald-700 font-bold">
-                          {shop.payout_upi_id || 'N/A'}
-                        </span>
-                      </div>
-                    </div>
-                  </div>
-                </div>
-
-                <div className="flex items-center gap-2 shrink-0 flex-wrap">
-                  {shop.owner_id_proof_url && (
-                    <button
-                      onClick={() => setInspectDocUrl(shop.owner_id_proof_url || null)}
-                      className="px-3 py-1.5 bg-white hover:bg-slate-100 border border-slate-300 rounded-xl text-xs font-bold text-slate-700 transition flex items-center gap-1"
-                    >
-                      <Eye className="w-3.5 h-3.5 text-orange-600" />
-                      Doc Proof
-                    </button>
-                  )}
-                  {shop.status === 'pending' ? (
-                    <>
-                      <button
-                        onClick={() => onApproveShopRegistration?.(shop.id)}
-                        className="px-3.5 py-1.5 bg-emerald-600 hover:bg-emerald-700 active:scale-95 text-white rounded-xl text-xs font-black transition flex items-center gap-1 shadow-xs"
-                      >
-                        <CheckCircle2 className="w-3.5 h-3.5" /> Accept & Approve Shop
-                      </button>
-                      <button
-                        onClick={() => onRejectShopRegistration?.(shop.id)}
-                        className="px-3.5 py-1.5 bg-red-600 hover:bg-red-700 active:scale-95 text-white rounded-xl text-xs font-black transition flex items-center gap-1 shadow-xs"
-                      >
-                        <XCircle className="w-3.5 h-3.5" /> Reject Shop
-                      </button>
-                    </>
-                  ) : (
-                    <div className="flex items-center gap-1.5">
-                      <button
-                        onClick={() => onApproveShopRegistration?.(shop.id)}
-                        className={`px-3 py-1 rounded-xl text-xs font-bold transition ${
-                          shop.status === 'approved'
-                            ? 'bg-emerald-100 text-emerald-800 border border-emerald-300'
-                            : 'bg-slate-100 hover:bg-emerald-50 text-slate-600 hover:text-emerald-700'
-                        }`}
-                      >
-                        {shop.status === 'approved' ? '✓ Approved' : 'Set Approved'}
-                      </button>
-                      <button
-                        onClick={() => onRejectShopRegistration?.(shop.id)}
-                        className={`px-3 py-1 rounded-xl text-xs font-bold transition ${
-                          shop.status === 'rejected'
-                            ? 'bg-red-100 text-red-800 border border-red-300'
-                            : 'bg-slate-100 hover:bg-red-50 text-slate-600 hover:text-red-700'
-                        }`}
-                      >
-                        {shop.status === 'rejected' ? '✕ Rejected' : 'Set Rejected'}
-                      </button>
-                    </div>
-                  )}
-                </div>
-              </div>
-            ))}
-
-            {filteredVehicles.map((veh) => (
-              <div
-                key={veh.id}
-                className="bg-slate-50/80 border border-slate-200 rounded-2xl p-4 sm:p-5 flex flex-col md:flex-row md:items-center justify-between gap-4 hover:border-slate-300 transition"
-              >
-                <div className="flex items-start gap-3.5 flex-1 min-w-0">
-                  <div className="flex-1 min-w-0 space-y-1">
-                    <div className="flex items-center gap-2 flex-wrap">
-                      <span className="font-bold text-slate-900 text-base">
-                        {veh.vehicle_model} ({veh.vehicle_reg_no || veh.vehicle_number || 'Registered'})
-                      </span>
-                      <span className="bg-blue-100 text-blue-800 text-[10px] font-bold px-2 py-0.5 rounded-full">
-                        {veh.vehicle_type}
-                      </span>
-                      <span
-                        className={`text-[10px] font-black uppercase px-2 py-0.5 rounded-full ${
-                          veh.status === 'approved'
-                            ? 'bg-emerald-100 text-emerald-800'
-                            : veh.status === 'rejected'
-                            ? 'bg-red-100 text-red-800'
-                            : 'bg-amber-100 text-amber-800'
-                        }`}
-                      >
-                        {veh.status}
-                      </span>
-                    </div>
-
-                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 text-xs text-slate-600 pt-1">
-                      <div>
-                        <strong>Driver:</strong> <span>{veh.driver_name}</span> ({veh.driver_phone})
-                      </div>
-                      <div>
-                        <strong>DL No:</strong>{' '}
-                        <span className="font-mono text-blue-700 font-bold">{veh.driving_license_no}</span>
-                      </div>
-                      <div>
-                        <strong>Route:</strong> <span>{veh.operational_route}</span>
-                      </div>
-                      <div>
-                        <strong>Payout UPI:</strong>{' '}
-                        <span className="font-mono text-emerald-700 font-bold">
-                          {veh.payout_upi_id || 'N/A'}
-                        </span>
-                      </div>
-                    </div>
-                  </div>
-                </div>
-
-                <div className="flex items-center gap-2 shrink-0 flex-wrap">
-                  {veh.driving_license_proof_url && (
-                    <button
-                      onClick={() => setInspectDocUrl(veh.driving_license_proof_url || null)}
-                      className="px-3 py-1.5 bg-white hover:bg-slate-100 border border-slate-300 rounded-xl text-xs font-bold text-slate-700 transition flex items-center gap-1"
-                    >
-                      <Eye className="w-3.5 h-3.5 text-blue-600" />
-                      DL Proof
-                    </button>
-                  )}
-                  {veh.status === 'pending' ? (
-                    <>
-                      <button
-                        onClick={() => onApproveVehicleRegistration?.(veh.id)}
-                        className="px-3.5 py-1.5 bg-emerald-600 hover:bg-emerald-700 active:scale-95 text-white rounded-xl text-xs font-black transition flex items-center gap-1 shadow-xs"
-                      >
-                        <CheckCircle2 className="w-3.5 h-3.5" /> Accept & Approve Vehicle
-                      </button>
-                      <button
-                        onClick={() => onRejectVehicleRegistration?.(veh.id)}
-                        className="px-3.5 py-1.5 bg-red-600 hover:bg-red-700 active:scale-95 text-white rounded-xl text-xs font-black transition flex items-center gap-1 shadow-xs"
-                      >
-                        <XCircle className="w-3.5 h-3.5" /> Reject Vehicle
-                      </button>
-                    </>
-                  ) : (
-                    <div className="flex items-center gap-1.5">
-                      <button
-                        onClick={() => onApproveVehicleRegistration?.(veh.id)}
-                        className={`px-3 py-1 rounded-xl text-xs font-bold transition ${
-                          veh.status === 'approved'
-                            ? 'bg-emerald-100 text-emerald-800 border border-emerald-300'
-                            : 'bg-slate-100 hover:bg-emerald-50 text-slate-600 hover:text-emerald-700'
-                        }`}
-                      >
-                        {veh.status === 'approved' ? '✓ Approved' : 'Set Approved'}
-                      </button>
-                      <button
-                        onClick={() => onRejectVehicleRegistration?.(veh.id)}
-                        className={`px-3 py-1 rounded-xl text-xs font-bold transition ${
-                          veh.status === 'rejected'
-                            ? 'bg-red-100 text-red-800 border border-red-300'
-                            : 'bg-slate-100 hover:bg-red-50 text-slate-600 hover:text-red-700'
-                        }`}
-                      >
-                        {veh.status === 'rejected' ? '✕ Rejected' : 'Set Rejected'}
-                      </button>
-                    </div>
-                  )}
-                </div>
-              </div>
-            ))}
+            <div className="relative w-full sm:w-72">
+              <Search className="w-4 h-4 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2" />
+              <input
+                type="text"
+                value={regSearch}
+                onChange={(e) => setRegSearch(e.target.value)}
+                placeholder="Search by name, phone, license, UPI..."
+                className="w-full bg-white border border-slate-200 rounded-xl pl-9 pr-3 py-1.5 text-xs text-slate-900 placeholder:text-slate-400 focus:outline-none focus:ring-2 focus:ring-orange-500"
+              />
+            </div>
           </div>
+
+          {/* Notification Alert for Payout Actions */}
+          {payoutSuccessMsg && (
+            <div className="bg-emerald-50 border border-emerald-300 text-emerald-900 px-4 py-3 rounded-2xl text-xs font-bold flex items-center justify-between shadow-xs animate-in fade-in">
+              <div className="flex items-center gap-2">
+                <CheckCircle2 className="w-4 h-4 text-emerald-600 shrink-0" />
+                <span>{payoutSuccessMsg}</span>
+              </div>
+              <button onClick={() => setPayoutSuccessMsg(null)} className="text-emerald-700 hover:text-emerald-900">
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+          )}
+
+          {/* ========================================================================= */}
+          {/* SECTION 1: SHOPS / SELLERS FLOW */}
+          {/* ========================================================================= */}
+          {(regTypeFilter === 'all' || regTypeFilter === 'shops') && (
+            <div className="space-y-3">
+              <div className="flex items-center justify-between pb-1 border-b border-orange-100">
+                <div className="flex items-center gap-2 text-sm font-black text-orange-950">
+                  <Store className="w-4 h-4 text-orange-600" />
+                  <span>1. Shops & Sellers Directory ({filteredShops.length})</span>
+                </div>
+                <span className="text-[11px] font-semibold text-orange-800 bg-orange-50 px-2 py-0.5 rounded-full border border-orange-200">
+                  Trade License / GSTIN Verified
+                </span>
+              </div>
+
+              {filteredShops.length === 0 ? (
+                <div className="p-6 text-center text-xs text-slate-400 bg-slate-50 rounded-2xl border border-dashed border-slate-200">
+                  No shops found matching the current criteria.
+                </div>
+              ) : (
+                filteredShops.map((shop) => {
+                  const targetKey = `shop_${shop.id}`;
+                  const balance = getUserWalletBalance(shop.user_id);
+                  const isProcessing = processingPayoutKey === targetKey;
+
+                  return (
+                    <div
+                      key={shop.id}
+                      className="bg-slate-50/90 border border-slate-200 rounded-2xl p-4 sm:p-5 flex flex-col xl:flex-row xl:items-center justify-between gap-4 hover:border-slate-300 transition shadow-2xs"
+                    >
+                      <div className="flex items-start gap-3.5 flex-1 min-w-0">
+                        <div className="w-10 h-10 rounded-xl bg-orange-100 border border-orange-200 flex items-center justify-center text-orange-700 shrink-0">
+                          <Store className="w-5 h-5" />
+                        </div>
+
+                        <div className="flex-1 min-w-0 space-y-1.5">
+                          <div className="flex items-center gap-2 flex-wrap">
+                            <span className="font-black text-slate-900 text-base">{shop.shop_name}</span>
+                            <span className="bg-orange-100 text-orange-800 text-[10px] font-bold px-2 py-0.5 rounded-full">
+                              {shop.category || 'General Store'}
+                            </span>
+                            <span
+                              className={`text-[10px] font-black uppercase px-2 py-0.5 rounded-full ${
+                                shop.status === 'approved'
+                                  ? 'bg-emerald-100 text-emerald-800'
+                                  : shop.status === 'rejected'
+                                  ? 'bg-red-100 text-red-800'
+                                  : 'bg-amber-100 text-amber-800'
+                              }`}
+                            >
+                              {shop.status}
+                            </span>
+                          </div>
+
+                          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-2 text-xs text-slate-600 pt-0.5">
+                            <div>
+                              <strong className="text-slate-800">Trade Lic / GSTIN ({shop.shop_id_proof_type || 'License'}):</strong>{' '}
+                              <span className="font-mono text-orange-700 font-bold">{shop.shop_id_no || 'N/A'}</span>
+                            </div>
+                            <div>
+                              <strong className="text-slate-800">Owner ({shop.owner_id_type || 'Govt ID'}):</strong>{' '}
+                              <span>{shop.owner_name}</span> ({shop.user_phone})
+                            </div>
+                            <div>
+                              <strong className="text-slate-800">Address:</strong>{' '}
+                              <span>{shop.shop_address || 'Meghalaya'}</span>
+                            </div>
+                            <div className="flex items-center gap-1.5">
+                              <strong className="text-slate-800">Payout UPI:</strong>{' '}
+                              <span className="font-mono text-emerald-700 font-bold bg-emerald-50 px-1.5 py-0.5 rounded border border-emerald-200 select-all">
+                                {shop.payout_upi_id || 'Not set'}
+                              </span>
+                              {shop.payout_upi_id && (
+                                <button
+                                  onClick={() => {
+                                    navigator.clipboard.writeText(shop.payout_upi_id || '');
+                                    setCopiedUpi(shop.payout_upi_id || '');
+                                    setTimeout(() => setCopiedUpi(null), 2000);
+                                  }}
+                                  className="text-slate-400 hover:text-emerald-700"
+                                  title="Copy UPI"
+                                >
+                                  {copiedUpi === shop.payout_upi_id ? (
+                                    <Check className="w-3.5 h-3.5 text-emerald-600" />
+                                  ) : (
+                                    <Copy className="w-3.5 h-3.5" />
+                                  )}
+                                </button>
+                              )}
+                            </div>
+                            <div>
+                              <strong className="text-slate-800">Wallet Balance:</strong>{' '}
+                              <span className="font-mono font-black text-emerald-600 bg-emerald-100/60 px-2 py-0.5 rounded-md">
+                                ₹{formatPrice(balance)}
+                              </span>
+                            </div>
+                          </div>
+                        </div>
+                      </div>
+
+                      {/* Right Action & Payout Desk */}
+                      <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-2.5 shrink-0 pt-3 xl:pt-0 border-t xl:border-t-0 border-slate-200">
+                        {/* Inline Payout Field */}
+                        <div className="flex items-center gap-1.5 bg-white p-1.5 rounded-xl border border-slate-200 shadow-2xs">
+                          <span className="text-xs font-bold text-slate-500 pl-1.5">₹</span>
+                          <input
+                            type="number"
+                            placeholder="Amount"
+                            value={payoutInputs[targetKey] || ''}
+                            onChange={(e) =>
+                              setPayoutInputs((prev) => ({ ...prev, [targetKey]: e.target.value }))
+                            }
+                            className="w-20 text-xs font-mono font-bold bg-transparent text-slate-900 focus:outline-none"
+                          />
+                          <button
+                            disabled={isProcessing}
+                            onClick={() =>
+                              handleCardPayout(
+                                shop.user_id,
+                                targetKey,
+                                shop.payout_upi_id,
+                                'seller',
+                                shop.owner_name || shop.shop_name,
+                                shop.user_phone
+                              )
+                            }
+                            className="px-2.5 py-1 bg-emerald-600 hover:bg-emerald-700 disabled:opacity-50 text-white rounded-lg text-xs font-bold transition flex items-center gap-1 shadow-2xs"
+                          >
+                            <Send className="w-3 h-3" />
+                            {isProcessing ? 'Paying...' : 'Payout'}
+                          </button>
+                        </div>
+
+                        {shop.owner_id_proof_url && (
+                          <button
+                            onClick={() => setInspectDocUrl(shop.owner_id_proof_url || null)}
+                            className="px-3 py-1.5 bg-white hover:bg-slate-100 border border-slate-300 rounded-xl text-xs font-bold text-slate-700 transition flex items-center justify-center gap-1"
+                          >
+                            <Eye className="w-3.5 h-3.5 text-orange-600" />
+                            Doc Proof
+                          </button>
+                        )}
+
+                        {shop.status === 'pending' ? (
+                          <div className="flex items-center gap-1.5">
+                            <button
+                              onClick={() => onApproveShopRegistration?.(shop.id)}
+                              className="px-3 py-1.5 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl text-xs font-black transition flex items-center gap-1 shadow-xs"
+                            >
+                              <CheckCircle2 className="w-3.5 h-3.5" /> Approve
+                            </button>
+                            <button
+                              onClick={() => onRejectShopRegistration?.(shop.id)}
+                              className="px-3 py-1.5 bg-red-600 hover:bg-red-700 text-white rounded-xl text-xs font-black transition flex items-center gap-1 shadow-xs"
+                            >
+                              <XCircle className="w-3.5 h-3.5" /> Reject
+                            </button>
+                          </div>
+                        ) : (
+                          <div className="flex items-center gap-1">
+                            <button
+                              onClick={() => onApproveShopRegistration?.(shop.id)}
+                              className={`px-2.5 py-1 rounded-lg text-xs font-bold transition ${
+                                shop.status === 'approved'
+                                  ? 'bg-emerald-100 text-emerald-800 border border-emerald-300'
+                                  : 'bg-slate-100 hover:bg-emerald-50 text-slate-600'
+                              }`}
+                            >
+                              ✓ Approved
+                            </button>
+                            <button
+                              onClick={() => onRejectShopRegistration?.(shop.id)}
+                              className={`px-2.5 py-1 rounded-lg text-xs font-bold transition ${
+                                shop.status === 'rejected'
+                                  ? 'bg-red-100 text-red-800 border border-red-300'
+                                  : 'bg-slate-100 hover:bg-red-50 text-slate-600'
+                              }`}
+                            >
+                              ✕ Rejected
+                            </button>
+                          </div>
+                        )}
+                      </div>
+                    </div>
+                  );
+                })
+              )}
+            </div>
+          )}
+
+          {/* ========================================================================= */}
+          {/* SECTION 2: CAB & TAXI DRIVERS FLOW */}
+          {/* ========================================================================= */}
+          {(regTypeFilter === 'all' || regTypeFilter === 'vehicles') && (
+            <div className="space-y-3 pt-2">
+              <div className="flex items-center justify-between pb-1 border-b border-blue-100">
+                <div className="flex items-center gap-2 text-sm font-black text-blue-950">
+                  <Car className="w-4 h-4 text-blue-600" />
+                  <span>2. Cab & Taxi Drivers Directory ({filteredVehicles.length})</span>
+                </div>
+                <span className="text-[11px] font-semibold text-blue-800 bg-blue-50 px-2 py-0.5 rounded-full border border-blue-200">
+                  DL & Taxi Route Verified
+                </span>
+              </div>
+
+              {filteredVehicles.length === 0 ? (
+                <div className="p-6 text-center text-xs text-slate-400 bg-slate-50 rounded-2xl border border-dashed border-slate-200">
+                  No cab or taxi driver records found matching criteria.
+                </div>
+              ) : (
+                filteredVehicles.map((veh) => {
+                  const targetKey = `veh_${veh.id}`;
+                  const balance = getUserWalletBalance(veh.user_id);
+                  const isProcessing = processingPayoutKey === targetKey;
+
+                  return (
+                    <div
+                      key={veh.id}
+                      className="bg-slate-50/90 border border-slate-200 rounded-2xl p-4 sm:p-5 flex flex-col xl:flex-row xl:items-center justify-between gap-4 hover:border-slate-300 transition shadow-2xs"
+                    >
+                      <div className="flex items-start gap-3.5 flex-1 min-w-0">
+                        <div className="w-10 h-10 rounded-xl bg-blue-100 border border-blue-200 flex items-center justify-center text-blue-700 shrink-0">
+                          <Car className="w-5 h-5" />
+                        </div>
+
+                        <div className="flex-1 min-w-0 space-y-1.5">
+                          <div className="flex items-center gap-2 flex-wrap">
+                            <span className="font-black text-slate-900 text-base">
+                              {veh.vehicle_model || 'Commercial Vehicle'} (
+                              {veh.vehicle_reg_no || veh.vehicle_number || 'Registered RC'})
+                            </span>
+                            <span className="bg-blue-100 text-blue-800 text-[10px] font-bold px-2 py-0.5 rounded-full">
+                              {veh.vehicle_type || 'Local Taxi'}
+                            </span>
+                            <span
+                              className={`text-[10px] font-black uppercase px-2 py-0.5 rounded-full ${
+                                veh.status === 'approved'
+                                  ? 'bg-emerald-100 text-emerald-800'
+                                  : veh.status === 'rejected'
+                                  ? 'bg-red-100 text-red-800'
+                                  : 'bg-amber-100 text-amber-800'
+                              }`}
+                            >
+                              {veh.status}
+                            </span>
+                          </div>
+
+                          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-2 text-xs text-slate-600 pt-0.5">
+                            <div>
+                              <strong className="text-slate-800">Driver:</strong> <span>{veh.driver_name}</span> (
+                              {veh.driver_phone})
+                            </div>
+                            <div>
+                              <strong className="text-slate-800">Driving License:</strong>{' '}
+                              <span className="font-mono text-blue-700 font-bold">
+                                {veh.driving_license_no || 'N/A'}
+                              </span>
+                            </div>
+                            <div>
+                              <strong className="text-slate-800">Operational Route:</strong>{' '}
+                              <span>{veh.operational_route || 'All Meghalaya'}</span>
+                            </div>
+                            <div className="flex items-center gap-1.5">
+                              <strong className="text-slate-800">Payout UPI:</strong>{' '}
+                              <span className="font-mono text-emerald-700 font-bold bg-emerald-50 px-1.5 py-0.5 rounded border border-emerald-200 select-all">
+                                {veh.payout_upi_id || 'Not set'}
+                              </span>
+                              {veh.payout_upi_id && (
+                                <button
+                                  onClick={() => {
+                                    navigator.clipboard.writeText(veh.payout_upi_id || '');
+                                    setCopiedUpi(veh.payout_upi_id || '');
+                                    setTimeout(() => setCopiedUpi(null), 2000);
+                                  }}
+                                  className="text-slate-400 hover:text-emerald-700"
+                                  title="Copy UPI"
+                                >
+                                  {copiedUpi === veh.payout_upi_id ? (
+                                    <Check className="w-3.5 h-3.5 text-emerald-600" />
+                                  ) : (
+                                    <Copy className="w-3.5 h-3.5" />
+                                  )}
+                                </button>
+                              )}
+                            </div>
+                            <div>
+                              <strong className="text-slate-800">Wallet Balance:</strong>{' '}
+                              <span className="font-mono font-black text-emerald-600 bg-emerald-100/60 px-2 py-0.5 rounded-md">
+                                ₹{formatPrice(balance)}
+                              </span>
+                            </div>
+                          </div>
+                        </div>
+                      </div>
+
+                      {/* Right Action & Payout Desk */}
+                      <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-2.5 shrink-0 pt-3 xl:pt-0 border-t xl:border-t-0 border-slate-200">
+                        {/* Inline Payout Field */}
+                        <div className="flex items-center gap-1.5 bg-white p-1.5 rounded-xl border border-slate-200 shadow-2xs">
+                          <span className="text-xs font-bold text-slate-500 pl-1.5">₹</span>
+                          <input
+                            type="number"
+                            placeholder="Amount"
+                            value={payoutInputs[targetKey] || ''}
+                            onChange={(e) =>
+                              setPayoutInputs((prev) => ({ ...prev, [targetKey]: e.target.value }))
+                            }
+                            className="w-20 text-xs font-mono font-bold bg-transparent text-slate-900 focus:outline-none"
+                          />
+                          <button
+                            disabled={isProcessing}
+                            onClick={() =>
+                              handleCardPayout(
+                                veh.user_id,
+                                targetKey,
+                                veh.payout_upi_id,
+                                'driver',
+                                veh.driver_name,
+                                veh.driver_phone
+                              )
+                            }
+                            className="px-2.5 py-1 bg-emerald-600 hover:bg-emerald-700 disabled:opacity-50 text-white rounded-lg text-xs font-bold transition flex items-center gap-1 shadow-2xs"
+                          >
+                            <Send className="w-3 h-3" />
+                            {isProcessing ? 'Paying...' : 'Payout'}
+                          </button>
+                        </div>
+
+                        {veh.driving_license_proof_url && (
+                          <button
+                            onClick={() => setInspectDocUrl(veh.driving_license_proof_url || null)}
+                            className="px-3 py-1.5 bg-white hover:bg-slate-100 border border-slate-300 rounded-xl text-xs font-bold text-slate-700 transition flex items-center justify-center gap-1"
+                          >
+                            <Eye className="w-3.5 h-3.5 text-blue-600" />
+                            DL Proof
+                          </button>
+                        )}
+
+                        {veh.status === 'pending' ? (
+                          <div className="flex items-center gap-1.5">
+                            <button
+                              onClick={() => onApproveVehicleRegistration?.(veh.id)}
+                              className="px-3 py-1.5 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl text-xs font-black transition flex items-center gap-1 shadow-xs"
+                            >
+                              <CheckCircle2 className="w-3.5 h-3.5" /> Approve
+                            </button>
+                            <button
+                              onClick={() => onRejectVehicleRegistration?.(veh.id)}
+                              className="px-3 py-1.5 bg-red-600 hover:bg-red-700 text-white rounded-xl text-xs font-black transition flex items-center gap-1 shadow-xs"
+                            >
+                              <XCircle className="w-3.5 h-3.5" /> Reject
+                            </button>
+                          </div>
+                        ) : (
+                          <div className="flex items-center gap-1">
+                            <button
+                              onClick={() => onApproveVehicleRegistration?.(veh.id)}
+                              className={`px-2.5 py-1 rounded-lg text-xs font-bold transition ${
+                                veh.status === 'approved'
+                                  ? 'bg-emerald-100 text-emerald-800 border border-emerald-300'
+                                  : 'bg-slate-100 hover:bg-emerald-50 text-slate-600'
+                              }`}
+                            >
+                              ✓ Approved
+                            </button>
+                            <button
+                              onClick={() => onRejectVehicleRegistration?.(veh.id)}
+                              className={`px-2.5 py-1 rounded-lg text-xs font-bold transition ${
+                                veh.status === 'rejected'
+                                  ? 'bg-red-100 text-red-800 border border-red-300'
+                                  : 'bg-slate-100 hover:bg-red-50 text-slate-600'
+                              }`}
+                            >
+                              ✕ Rejected
+                            </button>
+                          </div>
+                        )}
+                      </div>
+                    </div>
+                  );
+                })
+              )}
+            </div>
+          )}
+
+          {/* ========================================================================= */}
+          {/* SECTION 3: DELIVERY BOYS / FLEET FLOW */}
+          {/* ========================================================================= */}
+          {(regTypeFilter === 'all' || regTypeFilter === 'delivery_fleet') && (
+            <div className="space-y-3 pt-2">
+              <div className="flex items-center justify-between pb-1 border-b border-emerald-100">
+                <div className="flex items-center gap-2 text-sm font-black text-emerald-950">
+                  <Bike className="w-4 h-4 text-emerald-600" />
+                  <span>3. Delivery Fleet Riders Directory ({filteredDeliveryFleet.length})</span>
+                </div>
+                <span className="text-[11px] font-semibold text-emerald-800 bg-emerald-50 px-2 py-0.5 rounded-full border border-emerald-200">
+                  Delivery Fleet & Payout Active
+                </span>
+              </div>
+
+              {filteredDeliveryFleet.length === 0 ? (
+                <div className="p-6 text-center text-xs text-slate-400 bg-slate-50 rounded-2xl border border-dashed border-slate-200">
+                  No delivery fleet riders found matching criteria.
+                </div>
+              ) : (
+                filteredDeliveryFleet.map((fleet) => {
+                  const targetKey = `fleet_${fleet.id}`;
+                  const balance = getUserWalletBalance(fleet.user_id);
+                  const isProcessing = processingPayoutKey === targetKey;
+
+                  return (
+                    <div
+                      key={fleet.id}
+                      className="bg-slate-50/90 border border-slate-200 rounded-2xl p-4 sm:p-5 flex flex-col xl:flex-row xl:items-center justify-between gap-4 hover:border-slate-300 transition shadow-2xs"
+                    >
+                      <div className="flex items-start gap-3.5 flex-1 min-w-0">
+                        <div className="w-10 h-10 rounded-xl bg-emerald-100 border border-emerald-200 flex items-center justify-center text-emerald-700 shrink-0">
+                          <Bike className="w-5 h-5" />
+                        </div>
+
+                        <div className="flex-1 min-w-0 space-y-1.5">
+                          <div className="flex items-center gap-2 flex-wrap">
+                            <span className="font-black text-slate-900 text-base">{fleet.full_name}</span>
+                            <span className="bg-emerald-100 text-emerald-800 text-[10px] font-bold px-2 py-0.5 rounded-full flex items-center gap-1">
+                              <Bike className="w-3 h-3" />
+                              {fleet.vehicle_type || 'Bike / Scooty'}
+                            </span>
+                            <span
+                              className={`text-[10px] font-black uppercase px-2 py-0.5 rounded-full ${
+                                fleet.status === 'approved' || fleet.is_approved
+                                  ? 'bg-emerald-100 text-emerald-800'
+                                  : fleet.status === 'rejected'
+                                  ? 'bg-red-100 text-red-800'
+                                  : 'bg-amber-100 text-amber-800'
+                              }`}
+                            >
+                              {fleet.status || 'pending'}
+                            </span>
+                          </div>
+
+                          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-2 text-xs text-slate-600 pt-0.5">
+                            <div>
+                              <strong className="text-slate-800">Phone:</strong>{' '}
+                              <span className="font-semibold text-slate-900">{fleet.phone || 'N/A'}</span>
+                            </div>
+                            <div>
+                              <strong className="text-slate-800">Vehicle / Bike No:</strong>{' '}
+                              <span className="font-mono text-emerald-700 font-bold">{fleet.vehicle_number}</span>
+                            </div>
+                            <div>
+                              <strong className="text-slate-800">DL / Govt ID:</strong>{' '}
+                              <span className="font-mono text-slate-700">
+                                {fleet.driving_license_no || 'Document On File'}
+                              </span>
+                            </div>
+                            <div className="flex items-center gap-1.5">
+                              <strong className="text-slate-800">Payout UPI:</strong>{' '}
+                              <span className="font-mono text-emerald-700 font-bold bg-emerald-50 px-1.5 py-0.5 rounded border border-emerald-200 select-all">
+                                {fleet.payout_upi || 'Not set'}
+                              </span>
+                              {fleet.payout_upi && (
+                                <button
+                                  onClick={() => {
+                                    navigator.clipboard.writeText(fleet.payout_upi);
+                                    setCopiedUpi(fleet.payout_upi);
+                                    setTimeout(() => setCopiedUpi(null), 2000);
+                                  }}
+                                  className="text-slate-400 hover:text-emerald-700"
+                                  title="Copy UPI"
+                                >
+                                  {copiedUpi === fleet.payout_upi ? (
+                                    <Check className="w-3.5 h-3.5 text-emerald-600" />
+                                  ) : (
+                                    <Copy className="w-3.5 h-3.5" />
+                                  )}
+                                </button>
+                              )}
+                            </div>
+                            <div>
+                              <strong className="text-slate-800">Wallet Balance:</strong>{' '}
+                              <span className="font-mono font-black text-emerald-600 bg-emerald-100/60 px-2 py-0.5 rounded-md">
+                                ₹{formatPrice(balance)}
+                              </span>
+                            </div>
+                          </div>
+                        </div>
+                      </div>
+
+                      {/* Right Action & Payout Desk */}
+                      <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-2.5 shrink-0 pt-3 xl:pt-0 border-t xl:border-t-0 border-slate-200">
+                        {/* Inline Payout Field */}
+                        <div className="flex items-center gap-1.5 bg-white p-1.5 rounded-xl border border-slate-200 shadow-2xs">
+                          <span className="text-xs font-bold text-slate-500 pl-1.5">₹</span>
+                          <input
+                            type="number"
+                            placeholder="Amount"
+                            value={payoutInputs[targetKey] || ''}
+                            onChange={(e) =>
+                              setPayoutInputs((prev) => ({ ...prev, [targetKey]: e.target.value }))
+                            }
+                            className="w-20 text-xs font-mono font-bold bg-transparent text-slate-900 focus:outline-none"
+                          />
+                          <button
+                            disabled={isProcessing}
+                            onClick={() =>
+                              handleCardPayout(
+                                fleet.user_id,
+                                targetKey,
+                                fleet.payout_upi,
+                                'delivery_partner',
+                                fleet.full_name,
+                                fleet.phone
+                              )
+                            }
+                            className="px-2.5 py-1 bg-emerald-600 hover:bg-emerald-700 disabled:opacity-50 text-white rounded-lg text-xs font-bold transition flex items-center gap-1 shadow-2xs"
+                          >
+                            <Send className="w-3 h-3" />
+                            {isProcessing ? 'Paying...' : 'Payout'}
+                          </button>
+                        </div>
+
+                        {fleet.driving_license_proof_url && (
+                          <button
+                            onClick={() => setInspectDocUrl(fleet.driving_license_proof_url || null)}
+                            className="px-3 py-1.5 bg-white hover:bg-slate-100 border border-slate-300 rounded-xl text-xs font-bold text-slate-700 transition flex items-center justify-center gap-1"
+                          >
+                            <Eye className="w-3.5 h-3.5 text-emerald-600" />
+                            ID Proof
+                          </button>
+                        )}
+
+                        {fleet.status === 'pending' || !fleet.is_approved ? (
+                          <div className="flex items-center gap-1.5">
+                            <button
+                              onClick={() => {
+                                if (onUpdateDeliveryPartner) {
+                                  onUpdateDeliveryPartner(
+                                    fleet.user_id,
+                                    true,
+                                    'active',
+                                    fleet.vehicle_type,
+                                    fleet.vehicle_number
+                                  );
+                                }
+                                if (fleet.source === 'service_reg' && onApproveServiceRegistration) {
+                                  onApproveServiceRegistration(fleet.id);
+                                }
+                              }}
+                              className="px-3 py-1.5 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl text-xs font-black transition flex items-center gap-1 shadow-xs"
+                            >
+                              <CheckCircle2 className="w-3.5 h-3.5" /> Approve Rider
+                            </button>
+                            <button
+                              onClick={() => {
+                                if (onUpdateDeliveryPartner) {
+                                  onUpdateDeliveryPartner(
+                                    fleet.user_id,
+                                    false,
+                                    'rejected',
+                                    fleet.vehicle_type,
+                                    fleet.vehicle_number
+                                  );
+                                }
+                                if (fleet.source === 'service_reg' && onRejectServiceRegistration) {
+                                  onRejectServiceRegistration(fleet.id, 'Admin verification declined');
+                                }
+                              }}
+                              className="px-3 py-1.5 bg-red-600 hover:bg-red-700 text-white rounded-xl text-xs font-black transition flex items-center gap-1 shadow-xs"
+                            >
+                              <XCircle className="w-3.5 h-3.5" /> Reject
+                            </button>
+                          </div>
+                        ) : (
+                          <div className="flex items-center gap-1">
+                            <button
+                              onClick={() => {
+                                if (onUpdateDeliveryPartner) {
+                                  onUpdateDeliveryPartner(fleet.user_id, true, 'active');
+                                }
+                              }}
+                              className="px-2.5 py-1 bg-emerald-100 text-emerald-800 border border-emerald-300 rounded-lg text-xs font-bold"
+                            >
+                              ✓ Approved Rider
+                            </button>
+                          </div>
+                        )}
+                      </div>
+                    </div>
+                  );
+                })
+              )}
+            </div>
+          )}
         </div>
       )}
 

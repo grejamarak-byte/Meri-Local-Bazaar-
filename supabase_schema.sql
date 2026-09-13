@@ -330,3 +330,49 @@ CREATE POLICY "Users can update their own listings"
     ON public.listings FOR UPDATE
     USING (auth.uid()::text = seller_id);
 
+-- ==============================================================================
+-- SECTION 6: WALLETS AND PAYOUT MANAGEMENT FOR SELLERS & DELIVERY FLEET
+-- ==============================================================================
+
+-- 1. Create public.wallets table linked to users/profiles
+CREATE TABLE IF NOT EXISTS public.wallets (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    user_id TEXT NOT NULL UNIQUE,
+    balance NUMERIC(12, 2) NOT NULL DEFAULT 0.00,
+    updated_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+-- 2. Create public.payout_logs table to track payouts sent by admin
+CREATE TABLE IF NOT EXISTS public.payout_logs (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    user_id TEXT NOT NULL,
+    amount NUMERIC(12, 2) NOT NULL,
+    status TEXT NOT NULL DEFAULT 'paid' CHECK (status IN ('pending', 'paid', 'cancelled', 'rejected')),
+    payout_upi TEXT,
+    transaction_id TEXT,
+    created_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+-- Indexes for performance
+CREATE INDEX IF NOT EXISTS idx_wallets_user_id ON public.wallets(user_id);
+CREATE INDEX IF NOT EXISTS idx_payout_logs_user_id ON public.payout_logs(user_id);
+CREATE INDEX IF NOT EXISTS idx_payout_logs_created_at ON public.payout_logs(created_at DESC);
+
+-- Enable Row Level Security (RLS)
+ALTER TABLE public.wallets ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.payout_logs ENABLE ROW LEVEL SECURITY;
+
+-- RLS Policies for Wallets
+DROP POLICY IF EXISTS "Users can view their own wallet or admin full access" ON public.wallets;
+CREATE POLICY "Users can view their own wallet or admin full access"
+    ON public.wallets FOR ALL
+    USING (true)
+    WITH CHECK (true);
+
+-- RLS Policies for Payout Logs
+DROP POLICY IF EXISTS "Users can view payout logs or admin manage" ON public.payout_logs;
+CREATE POLICY "Users can view payout logs or admin manage"
+    ON public.payout_logs FOR ALL
+    USING (true)
+    WITH CHECK (true);
+

@@ -40,6 +40,8 @@ import {
   BannerAd,
   PayoutRequest,
   CartItem,
+  Wallet,
+  PayoutLog,
   isMasterAdmin,
 } from './types';
 import { AdminControlRoom } from './components/AdminControlRoom';
@@ -643,6 +645,40 @@ const INITIAL_PAYOUT_REQUESTS: PayoutRequest[] = [
   },
 ];
 
+const INITIAL_WALLETS: Wallet[] = [
+  { id: 'wal_001', user_id: 'usr_me1', balance: 2300, updated_at: new Date().toISOString() },
+  { id: 'wal_002', user_id: 'usr_seller2', balance: 3200, updated_at: new Date().toISOString() },
+  { id: 'wal_003', user_id: 'usr_seller3', balance: 1850, updated_at: new Date().toISOString() },
+  { id: 'wal_004', user_id: 'usr_rider4', balance: 1200, updated_at: new Date().toISOString() },
+];
+
+const INITIAL_PAYOUT_LOGS: PayoutLog[] = [
+  {
+    id: 'paylog_001',
+    user_id: 'usr_me1',
+    amount: 850,
+    status: 'paid',
+    payout_upi: 'silgrak.marak@oksbi',
+    transaction_id: 'TXN-98421094',
+    created_at: new Date(Date.now() - 82800000).toISOString(),
+    user_name: 'Silgrak Marak (Rider)',
+    user_phone: '9876543210',
+    role: 'Delivery Partner',
+  },
+  {
+    id: 'paylog_002',
+    user_id: 'usr_seller2',
+    amount: 1500,
+    status: 'paid',
+    payout_upi: 'dilseng.sangma@paytm',
+    transaction_id: 'TXN-87410293',
+    created_at: new Date(Date.now() - 172800000).toISOString(),
+    user_name: 'Dilseng Sangma (Shopkeeper)',
+    user_phone: '9123456780',
+    role: 'Shop Owner',
+  },
+];
+
 type AppRoute = 'user' | 'admin' | 'delivery_register' | 'delivery_dashboard';
 
 type UserNavTab =
@@ -763,6 +799,8 @@ export function App() {
   const [deliveryOrders, setDeliveryOrders] = useState<DeliveryOrder[]>(INITIAL_DELIVERY_ORDERS);
   const [bannerAds, setBannerAds] = useState<BannerAd[]>(INITIAL_BANNER_ADS);
   const [payoutRequests, setPayoutRequests] = useState<PayoutRequest[]>(INITIAL_PAYOUT_REQUESTS);
+  const [wallets, setWallets] = useState<Wallet[]>(INITIAL_WALLETS);
+  const [payoutLogs, setPayoutLogs] = useState<PayoutLog[]>(INITIAL_PAYOUT_LOGS);
 
   const [loading, setLoading] = useState(false);
   const [selectedListing, setSelectedListing] = useState<Listing | null>(null);
@@ -1126,6 +1164,23 @@ export function App() {
         .order('created_at', { ascending: false });
       if (payoutsData && payoutsData.length > 0) {
         setPayoutRequests(payoutsData);
+      }
+
+      // 10. Wallets
+      const { data: walletsData } = await supabase
+        .from('wallets')
+        .select('*');
+      if (walletsData && walletsData.length > 0) {
+        setWallets(walletsData);
+      }
+
+      // 11. Payout Logs
+      const { data: payoutLogsData } = await supabase
+        .from('payout_logs')
+        .select('*')
+        .order('created_at', { ascending: false });
+      if (payoutLogsData && payoutLogsData.length > 0) {
+        setPayoutLogs(payoutLogsData);
       }
     } catch (err) {
       console.warn('Supabase fetch notification (using verified local state):', err);
@@ -1851,6 +1906,87 @@ export function App() {
   };
 
   // Withdrawal & Payout Handlers
+  const handleProcessPayout = async (
+    userId: string,
+    amount: number,
+    payoutUpi?: string,
+    role?: string,
+    userName?: string,
+    userPhone?: string
+  ) => {
+    const currentWallet = wallets.find((w) => w.user_id === userId);
+    const currentBalance = currentWallet ? Number(currentWallet.balance) || 0 : 0;
+    const newBalance = Math.max(0, currentBalance - amount);
+    const updatedTimestamp = new Date().toISOString();
+    const txnId = `TXN-${Date.now().toString().slice(-8)}`;
+
+    const newLog: PayoutLog = {
+      id: `paylog_${Date.now()}_${Math.random().toString(36).substr(2, 4)}`,
+      user_id: userId,
+      amount,
+      status: 'paid',
+      payout_upi: payoutUpi || '',
+      transaction_id: txnId,
+      created_at: updatedTimestamp,
+      user_name: userName || 'Partner',
+      user_phone: userPhone || '',
+      role: role || 'Partner',
+    };
+
+    // Update Wallets state
+    setWallets((prev) => {
+      const exists = prev.some((w) => w.user_id === userId);
+      if (exists) {
+        return prev.map((w) =>
+          w.user_id === userId ? { ...w, balance: newBalance, updated_at: updatedTimestamp } : w
+        );
+      }
+      return [
+        ...prev,
+        {
+          id: `wal_${Date.now()}`,
+          user_id: userId,
+          balance: newBalance,
+          updated_at: updatedTimestamp,
+        },
+      ];
+    });
+
+    // Update Payout Logs state
+    setPayoutLogs((prev) => [newLog, ...prev]);
+
+    // Update pending payout requests for this user if any
+    setPayoutRequests((prev) =>
+      prev.map((pr) =>
+        pr.user_id === userId && pr.status === 'pending'
+          ? { ...pr, status: 'completed', completed_at: updatedTimestamp }
+          : pr
+      )
+    );
+
+    // Sync with Supabase
+    if (supabase) {
+      try {
+        await supabase
+          .from('wallets')
+          .upsert(
+            { user_id: userId, balance: newBalance, updated_at: updatedTimestamp },
+            { onConflict: 'user_id' }
+          );
+
+        await supabase.from('payout_logs').insert([newLog]);
+
+        await supabase
+          .from('payout_requests')
+          .update({ status: 'completed', completed_at: updatedTimestamp })
+          .eq('user_id', userId)
+          .eq('status', 'pending');
+      } catch (err) {
+        console.warn('Supabase process payout sync:', err);
+      }
+    }
+  };
+
   const handleApprovePayout = async (id: string) => {
     const completedTimestamp = new Date().toISOString();
     setPayoutRequests((prev) =>
@@ -2575,6 +2711,9 @@ export function App() {
             deliveryOrders={deliveryOrders}
             bannerAds={bannerAds}
             payoutRequests={payoutRequests}
+            wallets={wallets}
+            payoutLogs={payoutLogs}
+            onProcessPayout={handleProcessPayout}
             onRefresh={fetchData}
             onViewListing={(item) => setSelectedListing(item)}
             onUpdateListingStatus={handleUpdateListingStatus}
