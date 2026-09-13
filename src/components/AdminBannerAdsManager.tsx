@@ -18,6 +18,7 @@ import {
   AlertCircle,
 } from 'lucide-react';
 import { BannerAd } from '../types';
+import { uploadListingImageToStorage } from '../lib/storage';
 
 interface AdminBannerAdsManagerProps {
   bannerAds: BannerAd[];
@@ -60,16 +61,17 @@ export const AdminBannerAdsManager: React.FC<AdminBannerAdsManagerProps> = ({
     }
 
     setUploadError(null);
-    const reader = new FileReader();
-    reader.onload = () => {
-      if (typeof reader.result === 'string') {
-        setImageUrl(reader.result);
-      }
-    };
-    reader.onerror = () => {
-      setUploadError('Failed to read image file.');
-    };
-    reader.readAsDataURL(file);
+    setIsSubmitting(true);
+    uploadListingImageToStorage(file)
+      .then((publicUrl) => {
+        setImageUrl(publicUrl);
+        setIsSubmitting(false);
+      })
+      .catch((err) => {
+        console.error('Banner upload error to "Listing image":', err);
+        setUploadError(`Failed to upload to "Listing image" bucket: ${err.message || err}`);
+        setIsSubmitting(false);
+      });
   };
 
   const handleEditClick = (banner: BannerAd) => {

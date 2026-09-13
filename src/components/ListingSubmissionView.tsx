@@ -13,8 +13,14 @@ import {
   Lock,
   Sparkles,
   MapPin,
+  Loader2,
 } from 'lucide-react';
 import { supabase } from '../lib/supabase';
+import {
+  uploadListingImageToStorage,
+  dataURLtoBlob,
+  LISTING_IMAGE_BUCKET,
+} from '../lib/storage';
 import { Listing, LocalAddressFields } from '../types';
 import { LocalAddressSelector, LocalAddressState } from './LocalAddressSelector';
 
@@ -35,6 +41,9 @@ interface PhotoItem {
   url: string;
   name: string;
   size: number;
+  file?: File;
+  uploadedUrl?: string;
+  isUploading?: boolean;
 }
 
 const MAX_PHOTOS = 6;
@@ -128,35 +137,43 @@ export const ListingSubmissionView: React.FC<ListingSubmissionViewProps> = ({
       setError(`Only ${availableSlots} more photo(s) added (Maximum limit: ${MAX_PHOTOS}).`);
     }
 
-    // Read all files asynchronously
-    const readers = filesToAdd.map((file, idx) => {
-      return new Promise<PhotoItem>((resolve, reject) => {
-        const reader = new FileReader();
-        reader.onload = (event) => {
-          const result = event.target?.result as string;
-          resolve({
-            id: `photo_${Date.now()}_${idx}_${Math.random().toString(36).substring(2, 6)}`,
-            url: result,
-            name: file.name,
-            size: file.size,
-          });
-        };
-        reader.onerror = () => reject(new Error(`Failed to read "${file.name}"`));
-        reader.readAsDataURL(file);
-      });
+    // Create photo items with immediate preview and trigger Supabase Storage upload
+    const newItems: PhotoItem[] = filesToAdd.map((file, idx) => ({
+      id: `photo_${Date.now()}_${idx}_${Math.random().toString(36).substring(2, 6)}`,
+      url: URL.createObjectURL(file), // instant local preview
+      name: file.name,
+      size: file.size,
+      file,
+      isUploading: true,
+    }));
+
+    setPhotos((prev) => {
+      const updated = [...prev, ...newItems];
+      return updated.slice(0, MAX_PHOTOS);
     });
 
-    Promise.all(readers)
-      .then((newPhotos) => {
-        setPhotos((prev) => {
-          const updated = [...prev, ...newPhotos];
-          return updated.slice(0, MAX_PHOTOS);
-        });
-      })
-      .catch((err) => {
-        console.error('File reading error:', err);
-        setError('Failed to process some photos from your device.');
-      });
+    // Upload directly to Supabase storage bucket "Listing image"
+    newItems.forEach(async (item) => {
+      if (!item.file) return;
+      try {
+        const publicUrl = await uploadListingImageToStorage(item.file);
+        setPhotos((current) =>
+          current.map((p) =>
+            p.id === item.id
+              ? { ...p, url: publicUrl, uploadedUrl: publicUrl, isUploading: false }
+              : p
+          )
+        );
+      } catch (err: any) {
+        console.warn(`Supabase Storage upload warning for ${item.name}:`, err);
+        // Keep local preview, will retry upload during final submit
+        setPhotos((current) =>
+          current.map((p) =>
+            p.id === item.id ? { ...p, isUploading: false } : p
+          )
+        );
+      }
+    });
   };
 
   const handleDrop = (e: React.DragEvent) => {
@@ -208,53 +225,57 @@ export const ListingSubmissionView: React.FC<ListingSubmissionViewProps> = ({
     setSubmitting(true);
     setError(null);
 
-    // Prepare array of image URLs
-    const photoUrls = photos.map((p) => p.url);
+    // Upload any pending or un-uploaded photos directly to Supabase Storage bucket "Listing image"
+    const uploadedPublicUrls: string[] = [];
 
-    // If serverless upload API is available, try uploading batch
-    let finalImagesJson = '';
-    if (photoUrls.length > 0) {
-      try {
-        const uploadResponse = await fetch('/api/upload', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ images: photoUrls }),
-        });
+    for (let i = 0; i < photos.length; i++) {
+      const photo = photos[i];
 
-        if (uploadResponse.ok) {
-          const uploadData = await uploadResponse.json();
-          if (uploadData.images_json) {
-            finalImagesJson = uploadData.images_json;
-          } else if (Array.isArray(uploadData.urls) && uploadData.urls.length > 0) {
-            finalImagesJson = JSON.stringify(uploadData.urls);
-          }
+      // 1. If already uploaded to Supabase Storage and returned a public HTTP URL
+      if (photo.uploadedUrl && photo.uploadedUrl.startsWith('http')) {
+        uploadedPublicUrls.push(photo.uploadedUrl);
+      }
+      // 2. If photo.url is already an external web URL (and not a local blob: URL)
+      else if (photo.url && photo.url.startsWith('http') && !photo.url.startsWith('blob:')) {
+        uploadedPublicUrls.push(photo.url);
+      }
+      // 3. If we have the raw File object, upload directly to "Listing image"
+      else if (photo.file) {
+        try {
+          const publicUrl = await uploadListingImageToStorage(photo.file);
+          uploadedPublicUrls.push(publicUrl);
+        } catch (uploadErr: any) {
+          console.error(`Failed to upload ${photo.name} to "${LISTING_IMAGE_BUCKET}":`, uploadErr);
+          setError(`Image upload failed for "${photo.name}": ${uploadErr.message || uploadErr}`);
+          setSubmitting(false);
+          return;
         }
-      } catch (uploadErr) {
-        console.warn('Vercel API /api/upload notice, saving photos directly:', uploadErr);
       }
-
-      // Fallback if API not available: store stringified photoUrls directly
-      if (!finalImagesJson) {
-        finalImagesJson = JSON.stringify(photoUrls);
+      // 4. If photo is a dataURL, convert to blob and upload directly to "Listing image"
+      else if (photo.url && photo.url.startsWith('data:')) {
+        try {
+          const blob = dataURLtoBlob(photo.url);
+          const publicUrl = await uploadListingImageToStorage(blob, photo.name);
+          uploadedPublicUrls.push(publicUrl);
+        } catch (uploadErr: any) {
+          console.error(`Failed to upload base64 image to "${LISTING_IMAGE_BUCKET}":`, uploadErr);
+        }
       }
-    } else {
-      // Default placeholder image
-      finalImagesJson = JSON.stringify([
-        'https://images.unsplash.com/photo-1526170375885-4d8ecf77b99f?w=800&auto=format&fit=crop&q=80',
-      ]);
     }
 
-    // Parse final array of URL strings for image_urls column
-    let parsedUrls: string[] = photoUrls;
-    try {
-      if (finalImagesJson && finalImagesJson.startsWith('[')) {
-        parsedUrls = JSON.parse(finalImagesJson);
-      }
-    } catch {
-      parsedUrls = photoUrls;
-    }
+    // Default fallback image if no photo was uploaded
+    const finalImageUrls: string[] =
+      uploadedPublicUrls.length > 0
+        ? uploadedPublicUrls
+        : [
+            'https://images.unsplash.com/photo-1526170375885-4d8ecf77b99f?w=800&auto=format&fit=crop&q=80',
+          ];
 
-    const finalLocationName = location.trim() || `${locationState.village ? locationState.village + ', ' : ''}${locationState.block}, ${locationState.district}`;
+    const finalImagesJson = JSON.stringify(finalImageUrls);
+
+    const finalLocationName =
+      location.trim() ||
+      `${locationState.village ? locationState.village + ', ' : ''}${locationState.block}, ${locationState.district}`;
 
     const finalListingId = generateUuid();
     const finalSellerId = ensureUuid(userId);
@@ -274,7 +295,7 @@ export const ListingSubmissionView: React.FC<ListingSubmissionViewProps> = ({
       phone: phone.trim(),
       whatsapp: whatsapp.trim() || phone.trim(),
       images_json: finalImagesJson,
-      image_urls: parsedUrls.length > 0 ? parsedUrls : ['https://images.unsplash.com/photo-1526170375885-4d8ecf77b99f?w=800&auto=format&fit=crop&q=80'],
+      image_urls: finalImageUrls,
       is_featured: isProUser,
       is_pro: isProUser,
       status: 'pending', // Strict moderation requirement
@@ -426,6 +447,14 @@ export const ListingSubmissionView: React.FC<ListingSubmissionViewProps> = ({
                   </div>
                 )}
 
+                {/* Storage Bucket Upload Indicator */}
+                {activePhoto?.isUploading && (
+                  <div className="absolute top-3 right-3 bg-slate-900/90 text-orange-400 text-[11px] font-bold px-3 py-1 rounded-lg flex items-center gap-1.5 shadow-md border border-orange-500/40">
+                    <Loader2 className="w-3.5 h-3.5 animate-spin text-orange-400" />
+                    <span>Uploading to &quot;Listing image&quot;...</span>
+                  </div>
+                )}
+
                 {/* Controls Overlay */}
                 <div className="absolute inset-0 bg-black/50 opacity-0 group-hover:opacity-100 transition flex items-center justify-center gap-2.5">
                   {photos.length < MAX_PHOTOS && (
@@ -477,6 +506,11 @@ export const ListingSubmissionView: React.FC<ListingSubmissionViewProps> = ({
                     }`}
                   >
                     <img src={photo.url} alt={photo.name} className="w-full h-full object-cover" />
+                    {photo.isUploading && (
+                      <div className="absolute inset-0 bg-slate-950/70 flex items-center justify-center">
+                        <Loader2 className="w-4 h-4 animate-spin text-orange-400" />
+                      </div>
+                    )}
                     {index === 0 && (
                       <div className="absolute top-0.5 left-0.5 bg-orange-600 text-white rounded-full p-0.5">
                         <Star className="w-2.5 h-2.5 fill-white" />

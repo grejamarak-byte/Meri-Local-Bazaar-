@@ -28,6 +28,7 @@ import {
   formatPrice,
   getListingPrimaryImage,
 } from '../types';
+import { uploadListingImageToStorage } from '../lib/storage';
 import { UpiIntentButtons } from './UpiIntentButtons';
 import { PolicyModal } from './PolicyModal';
 import { LocalAddressSelector, LocalAddressState } from './LocalAddressSelector';
@@ -136,11 +137,22 @@ export const CheckoutModal: React.FC<CheckoutModalProps> = ({
         alert('File size exceeds 8MB. Please select a compressed image.');
         return;
       }
-      const reader = new FileReader();
-      reader.onloadend = () => {
-        setScreenshotUrl(reader.result as string);
-      };
-      reader.readAsDataURL(file);
+      // Instant preview
+      setScreenshotUrl(URL.createObjectURL(file));
+      // Direct upload to Supabase Storage "Listing image"
+      uploadListingImageToStorage(file)
+        .then((publicUrl) => {
+          setScreenshotUrl(publicUrl);
+        })
+        .catch((err) => {
+          console.warn('Storage upload notice for receipt:', err);
+          // Fallback to dataURL
+          const reader = new FileReader();
+          reader.onloadend = () => {
+            setScreenshotUrl(reader.result as string);
+          };
+          reader.readAsDataURL(file);
+        });
     }
   };
 
