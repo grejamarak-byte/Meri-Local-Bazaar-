@@ -651,6 +651,9 @@ const INITIAL_WALLETS: Wallet[] = [
   { id: 'wal_002', user_id: 'usr_seller2', balance: 3200, updated_at: new Date().toISOString() },
   { id: 'wal_003', user_id: 'usr_seller3', balance: 1850, updated_at: new Date().toISOString() },
   { id: 'wal_004', user_id: 'usr_rider4', balance: 1200, updated_at: new Date().toISOString() },
+  { id: 'wal_005', user_id: 'usr_admin', balance: 4500, updated_at: new Date().toISOString() },
+  { id: 'wal_006', user_id: 'a0eebc99-9c0b-4ef8-bb6d-6bb9bd380001', balance: 5000, updated_at: new Date().toISOString() },
+  { id: 'wal_007', user_id: 'usr_seller1', balance: 3100, updated_at: new Date().toISOString() },
 ];
 
 const INITIAL_PAYOUT_LOGS: PayoutLog[] = [
