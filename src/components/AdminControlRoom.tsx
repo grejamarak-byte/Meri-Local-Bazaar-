@@ -584,19 +584,96 @@ export const AdminControlRoom: React.FC<AdminControlRoomProps> = ({
           </div>
         </div>
 
+        {/* Quick Action Alert & Jump Bar */}
+        <div className="mt-5 pt-4 border-t border-slate-800 flex items-center gap-2 overflow-x-auto pb-1 text-xs">
+          <span className="text-slate-400 font-bold uppercase tracking-wider text-[10px] shrink-0">Quick Jumps:</span>
+          
+          <button
+            onClick={() => {
+              setAdminTab('withdrawals');
+              setPayoutFilter('pending');
+            }}
+            className={`px-3 py-1.5 rounded-xl font-bold flex items-center gap-1.5 shrink-0 transition ${
+              adminTab === 'withdrawals'
+                ? 'bg-emerald-500 text-slate-950 font-black'
+                : 'bg-emerald-950/80 text-emerald-300 hover:bg-emerald-900 border border-emerald-800/80'
+            }`}
+          >
+            <DollarSign className="w-3.5 h-3.5" />
+            <span>Withdrawal Requests ({pendingPayoutsCount})</span>
+            {pendingPayoutsCount > 0 && (
+              <span className="bg-amber-400 text-slate-950 text-[10px] font-black px-1.5 py-0.2 rounded-full animate-pulse">
+                {pendingPayoutsCount}
+              </span>
+            )}
+          </button>
+
+          <button
+            onClick={() => {
+              setAdminTab('registrations');
+              setRegTypeFilter('delivery_fleet');
+              setRegFilter('pending');
+            }}
+            className={`px-3 py-1.5 rounded-xl font-bold flex items-center gap-1.5 shrink-0 transition ${
+              adminTab === 'registrations' && regTypeFilter === 'delivery_fleet'
+                ? 'bg-blue-500 text-white font-black'
+                : 'bg-blue-950/80 text-blue-300 hover:bg-blue-900 border border-blue-800/80'
+            }`}
+          >
+            <Bike className="w-3.5 h-3.5" />
+            <span>Delivery Fleet Riders ({pendingDeliveryFleetCount})</span>
+            {pendingDeliveryFleetCount > 0 && (
+              <span className="bg-amber-400 text-slate-950 text-[10px] font-black px-1.5 py-0.2 rounded-full">
+                {pendingDeliveryFleetCount}
+              </span>
+            )}
+          </button>
+
+          <button
+            onClick={() => {
+              setAdminTab('registrations');
+              setRegTypeFilter('services');
+              setRegFilter('pending');
+            }}
+            className={`px-3 py-1.5 rounded-xl font-bold flex items-center gap-1.5 shrink-0 transition ${
+              adminTab === 'registrations' && regTypeFilter === 'services'
+                ? 'bg-purple-500 text-white font-black'
+                : 'bg-purple-950/80 text-purple-300 hover:bg-purple-900 border border-purple-800/80'
+            }`}
+          >
+            <Briefcase className="w-3.5 h-3.5" />
+            <span>Local Services & Jobs ({pendingServicesCount})</span>
+          </button>
+
+          <button
+            onClick={() => {
+              setAdminTab('orders_verification');
+              setOrderFilter('pending_verification');
+            }}
+            className={`px-3 py-1.5 rounded-xl font-bold flex items-center gap-1.5 shrink-0 transition ${
+              adminTab === 'orders_verification'
+                ? 'bg-orange-500 text-white font-black'
+                : 'bg-orange-950/80 text-orange-300 hover:bg-orange-900 border border-orange-800/80'
+            }`}
+          >
+            <CreditCard className="w-3.5 h-3.5" />
+            <span>Prepaid Orders Pay ({pendingOrdersCount})</span>
+          </button>
+        </div>
+
         {/* Core Admin Tabs Navigation */}
-        <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-3 lg:grid-cols-9 gap-2 mt-6 pt-6 border-t border-slate-800">
+        <div className="grid grid-cols-2 sm:grid-cols-4 md:grid-cols-4 lg:grid-cols-4 xl:grid-cols-8 gap-2.5 mt-4 pt-4 border-t border-slate-800">
           <button
             onClick={() => setAdminTab('orders_verification')}
             className={`p-3 rounded-2xl text-left transition flex items-center justify-between ${
               adminTab === 'orders_verification'
-                ? 'bg-orange-600 text-white shadow-lg'
+                ? 'bg-orange-600 text-white shadow-lg ring-2 ring-orange-400/50'
                 : 'bg-slate-800/60 text-slate-300 hover:bg-slate-800'
             }`}
           >
             <div>
               <div className="text-xs font-bold flex items-center gap-1">
-                <CreditCard className="w-3.5 h-3.5" /> Orders Pay
+                <CreditCard className="w-3.5 h-3.5" /> 1. Orders Pay
               </div>
               <div className="text-[11px] opacity-80 mt-0.5">{deliveryOrders.length} Orders</div>
             </div>
@@ -608,155 +685,25 @@ export const AdminControlRoom: React.FC<AdminControlRoomProps> = ({
           </button>
 
           <button
-            onClick={() => setAdminTab('listings')}
-            className={`p-3 rounded-2xl text-left transition flex items-center justify-between ${
-              adminTab === 'listings'
-                ? 'bg-orange-600 text-white shadow-lg'
-                : 'bg-slate-800/60 text-slate-300 hover:bg-slate-800'
-            }`}
-          >
-            <div>
-              <div className="text-xs font-bold flex items-center gap-1.5">
-                <Tag className="w-3.5 h-3.5" />
-                <span>1. Listings</span>
-              </div>
-              <div className="text-[11px] opacity-80 mt-0.5">{listings.length} Listings</div>
-            </div>
-            {pendingListingsCount > 0 && (
-              <span className="bg-amber-400 text-slate-950 font-black text-xs px-2 py-0.5 rounded-full">
-                {pendingListingsCount}
-              </span>
-            )}
-          </button>
-
-          <button
             onClick={() => setAdminTab('registrations')}
             className={`p-3 rounded-2xl text-left transition flex items-center justify-between ${
               adminTab === 'registrations'
-                ? 'bg-orange-600 text-white shadow-lg'
+                ? 'bg-orange-600 text-white shadow-lg ring-2 ring-orange-400/50'
                 : 'bg-slate-800/60 text-slate-300 hover:bg-slate-800'
             }`}
           >
             <div>
               <div className="text-xs font-bold flex items-center gap-1.5">
                 <Store className="w-3.5 h-3.5" />
-                <span>2. Regs</span>
+                <span>2. Registrations</span>
               </div>
               <div className="text-[11px] opacity-80 mt-0.5">
-                {shopRegistrations.length + vehicleRegistrations.length} Shops
+                {shopRegistrations.length + vehicleRegistrations.length + allDeliveryFleet.length + serviceRegistrations.length} Total
               </div>
             </div>
-            {totalPendingRegistrations > 0 && (
+            {totalPendingRegistrations + pendingServicesCount > 0 && (
               <span className="bg-amber-400 text-slate-950 font-black text-xs px-2 py-0.5 rounded-full">
-                {totalPendingRegistrations}
-              </span>
-            )}
-          </button>
-
-          <button
-            onClick={() => setAdminTab('recharges')}
-            className={`p-3 rounded-2xl text-left transition flex items-center justify-between ${
-              adminTab === 'recharges'
-                ? 'bg-orange-600 text-white shadow-lg'
-                : 'bg-slate-800/60 text-slate-300 hover:bg-slate-800'
-            }`}
-          >
-            <div>
-              <div className="text-xs font-bold flex items-center gap-1.5">
-                <DollarSign className="w-3.5 h-3.5" />
-                <span>3. Recharge</span>
-              </div>
-              <div className="text-[11px] opacity-80 mt-0.5">{rechargeRequests.length} Pay</div>
-            </div>
-            {pendingRechargesCount > 0 && (
-              <span className="bg-amber-400 text-slate-950 font-black text-xs px-2 py-0.5 rounded-full">
-                {pendingRechargesCount}
-              </span>
-            )}
-          </button>
-
-          <button
-            onClick={() => setAdminTab('members')}
-            className={`p-3 rounded-2xl text-left transition flex items-center justify-between ${
-              adminTab === 'members'
-                ? 'bg-orange-600 text-white shadow-lg'
-                : 'bg-slate-800/60 text-slate-300 hover:bg-slate-800'
-            }`}
-          >
-            <div>
-              <div className="text-xs font-bold flex items-center gap-1.5">
-                <Users className="w-3.5 h-3.5" />
-                <span>4. Accounts</span>
-              </div>
-              <div className="text-[11px] opacity-80 mt-0.5">{profiles.length} Users</div>
-            </div>
-            <Users className="w-4 h-4 opacity-70" />
-          </button>
-
-          <button
-            onClick={() => setAdminTab('banner_ads')}
-            className={`p-3 rounded-2xl text-left transition flex items-center justify-between ${
-              adminTab === 'banner_ads'
-                ? 'bg-orange-600 text-white shadow-lg'
-                : 'bg-slate-800/60 text-slate-300 hover:bg-slate-800'
-            }`}
-          >
-            <div>
-              <div className="text-xs font-bold flex items-center gap-1.5">
-                <Megaphone className="w-3.5 h-3.5" />
-                <span>5. Banner Ads</span>
-              </div>
-              <div className="text-[11px] opacity-80 mt-0.5">
-                {bannerAds.filter((b) => b.is_active).length} Active
-              </div>
-            </div>
-            <span className="bg-emerald-500 text-slate-950 font-black text-[10px] px-1.5 py-0.5 rounded-full">
-              {bannerAds.length}
-            </span>
-          </button>
-
-          <button
-            onClick={() => setAdminTab('settings')}
-            className={`p-3 rounded-2xl text-left transition flex items-center justify-between ${
-              adminTab === 'settings'
-                ? 'bg-orange-600 text-white shadow-lg'
-                : 'bg-slate-800/60 text-slate-300 hover:bg-slate-800'
-            }`}
-          >
-            <div>
-              <div className="text-xs font-bold flex items-center gap-1.5">
-                <QrCode className="w-3.5 h-3.5" />
-                <span>6. QR & UPI</span>
-              </div>
-              <div className="text-[11px] opacity-80 mt-0.5">Settings</div>
-            </div>
-            <SettingsIcon className="w-4 h-4 opacity-70" />
-          </button>
-
-          <button
-            onClick={() => setAdminTab('services_jobs')}
-            className={`p-3 rounded-2xl text-left transition flex items-center justify-between ${
-              adminTab === 'services_jobs'
-                ? 'bg-orange-600 text-white shadow-lg'
-                : 'bg-slate-800/60 text-slate-300 hover:bg-slate-800'
-            }`}
-          >
-            <div>
-              <div className="text-xs font-bold flex items-center gap-1.5">
-                <Wrench className="w-3.5 h-3.5" />
-                <span>7. Local Services</span>
-              </div>
-              <div className="text-[11px] opacity-80 mt-0.5">
-                {pendingServicesCount > 0 ? (
-                  <span className="text-amber-400 font-bold">{pendingServicesCount} Pending</span>
-                ) : (
-                  <span>{serviceRegistrations.length} Profiles</span>
-                )}
-              </div>
-            </div>
-            {pendingServicesCount > 0 && (
-              <span className="bg-amber-400 text-slate-950 font-black text-xs px-2 py-0.5 rounded-full">
-                {pendingServicesCount}
+                {totalPendingRegistrations + pendingServicesCount}
               </span>
             )}
           </button>
@@ -765,14 +712,14 @@ export const AdminControlRoom: React.FC<AdminControlRoomProps> = ({
             onClick={() => setAdminTab('withdrawals')}
             className={`p-3 rounded-2xl text-left transition flex items-center justify-between ${
               adminTab === 'withdrawals'
-                ? 'bg-orange-600 text-white shadow-lg'
+                ? 'bg-emerald-600 text-white shadow-lg ring-2 ring-emerald-400/50'
                 : 'bg-slate-800/60 text-slate-300 hover:bg-slate-800'
             }`}
           >
             <div>
               <div className="text-xs font-bold flex items-center gap-1.5">
                 <DollarSign className="w-3.5 h-3.5 text-emerald-400" />
-                <span>8. Withdrawal Requests</span>
+                <span>3. Withdrawals</span>
               </div>
               <div className="text-[11px] opacity-80 mt-0.5">
                 {pendingPayoutsCount > 0 ? (
@@ -787,6 +734,108 @@ export const AdminControlRoom: React.FC<AdminControlRoomProps> = ({
                 {pendingPayoutsCount}
               </span>
             )}
+          </button>
+
+          <button
+            onClick={() => setAdminTab('listings')}
+            className={`p-3 rounded-2xl text-left transition flex items-center justify-between ${
+              adminTab === 'listings'
+                ? 'bg-orange-600 text-white shadow-lg ring-2 ring-orange-400/50'
+                : 'bg-slate-800/60 text-slate-300 hover:bg-slate-800'
+            }`}
+          >
+            <div>
+              <div className="text-xs font-bold flex items-center gap-1.5">
+                <Tag className="w-3.5 h-3.5" />
+                <span>4. Listings</span>
+              </div>
+              <div className="text-[11px] opacity-80 mt-0.5">{listings.length} Listings</div>
+            </div>
+            {pendingListingsCount > 0 && (
+              <span className="bg-amber-400 text-slate-950 font-black text-xs px-2 py-0.5 rounded-full">
+                {pendingListingsCount}
+              </span>
+            )}
+          </button>
+
+          <button
+            onClick={() => setAdminTab('recharges')}
+            className={`p-3 rounded-2xl text-left transition flex items-center justify-between ${
+              adminTab === 'recharges'
+                ? 'bg-orange-600 text-white shadow-lg ring-2 ring-orange-400/50'
+                : 'bg-slate-800/60 text-slate-300 hover:bg-slate-800'
+            }`}
+          >
+            <div>
+              <div className="text-xs font-bold flex items-center gap-1.5">
+                <DollarSign className="w-3.5 h-3.5" />
+                <span>5. Recharge</span>
+              </div>
+              <div className="text-[11px] opacity-80 mt-0.5">{rechargeRequests.length} Pay</div>
+            </div>
+            {pendingRechargesCount > 0 && (
+              <span className="bg-amber-400 text-slate-950 font-black text-xs px-2 py-0.5 rounded-full">
+                {pendingRechargesCount}
+              </span>
+            )}
+          </button>
+
+          <button
+            onClick={() => setAdminTab('members')}
+            className={`p-3 rounded-2xl text-left transition flex items-center justify-between ${
+              adminTab === 'members'
+                ? 'bg-orange-600 text-white shadow-lg ring-2 ring-orange-400/50'
+                : 'bg-slate-800/60 text-slate-300 hover:bg-slate-800'
+            }`}
+          >
+            <div>
+              <div className="text-xs font-bold flex items-center gap-1.5">
+                <Users className="w-3.5 h-3.5" />
+                <span>6. Accounts</span>
+              </div>
+              <div className="text-[11px] opacity-80 mt-0.5">{profiles.length} Users</div>
+            </div>
+            <Users className="w-4 h-4 opacity-70" />
+          </button>
+
+          <button
+            onClick={() => setAdminTab('banner_ads')}
+            className={`p-3 rounded-2xl text-left transition flex items-center justify-between ${
+              adminTab === 'banner_ads'
+                ? 'bg-orange-600 text-white shadow-lg ring-2 ring-orange-400/50'
+                : 'bg-slate-800/60 text-slate-300 hover:bg-slate-800'
+            }`}
+          >
+            <div>
+              <div className="text-xs font-bold flex items-center gap-1.5">
+                <Megaphone className="w-3.5 h-3.5" />
+                <span>7. Banner Ads</span>
+              </div>
+              <div className="text-[11px] opacity-80 mt-0.5">
+                {bannerAds.filter((b) => b.is_active).length} Active
+              </div>
+            </div>
+            <span className="bg-emerald-500 text-slate-950 font-black text-[10px] px-1.5 py-0.5 rounded-full">
+              {bannerAds.length}
+            </span>
+          </button>
+
+          <button
+            onClick={() => setAdminTab('settings')}
+            className={`p-3 rounded-2xl text-left transition flex items-center justify-between ${
+              adminTab === 'settings'
+                ? 'bg-orange-600 text-white shadow-lg ring-2 ring-orange-400/50'
+                : 'bg-slate-800/60 text-slate-300 hover:bg-slate-800'
+            }`}
+          >
+            <div>
+              <div className="text-xs font-bold flex items-center gap-1.5">
+                <QrCode className="w-3.5 h-3.5" />
+                <span>8. QR & UPI</span>
+              </div>
+              <div className="text-[11px] opacity-80 mt-0.5">Admin Settings</div>
+            </div>
+            <SettingsIcon className="w-4 h-4 opacity-70" />
           </button>
         </div>
       </div>
