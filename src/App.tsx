@@ -2751,7 +2751,7 @@ export function App() {
   // User cannot access Marketplace listings, categories, or dashboards until login
   // =========================================================================
   if (!currentUser) {
-    return <LoginScreen onLoginSuccess={handleLoginSuccess} />;
+    return <LoginScreen onLoginSuccess={handleLoginSuccess} isAdminRoute={currentRoute === 'admin'} />;
   }
 
   // =========================================================================

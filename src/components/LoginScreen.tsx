@@ -19,9 +19,10 @@ import { BrandIcon, BrandLogo } from './BrandLogo';
 
 interface LoginScreenProps {
   onLoginSuccess: (user: UserProfile) => void;
+  isAdminRoute?: boolean;
 }
 
-export const LoginScreen: React.FC<LoginScreenProps> = ({ onLoginSuccess }) => {
+export const LoginScreen: React.FC<LoginScreenProps> = ({ onLoginSuccess, isAdminRoute = false }) => {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [successMsg, setSuccessMsg] = useState<string | null>(null);
@@ -29,6 +30,31 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({ onLoginSuccess }) => {
   const [customName, setCustomName] = useState('');
   const [customPassword, setCustomPassword] = useState('');
   const [showCustomInput, setShowCustomInput] = useState(false);
+
+  // Quick 1-click admin access helper
+  const handleQuickAdminLogin = (emailChoice?: string) => {
+    const chosenEmail = emailChoice || 'chiamesangma588@gmail.com';
+    const isChiame = chosenEmail.toLowerCase().includes('chiame');
+    const adminUser: UserProfile = {
+      id: 'a0eebc99-9c0b-4ef8-bb6d-6bb9bd380001',
+      email: chosenEmail,
+      full_name: isChiame ? 'Chiame Sangma (Master Admin)' : 'Silgrak Marak (Master Admin)',
+      avatar_url: `https://api.dicebear.com/7.x/initials/svg?seed=Admin&backgroundColor=ea580c,059669`,
+      phone: '9876543210',
+      city: 'Tura, Meghalaya',
+      state: 'Meghalaya',
+      role: 'super_admin',
+      is_pro: true,
+      pro_status: 'active',
+      is_delivery_partner: false,
+      partner_status: 'none',
+      created_at: new Date().toISOString(),
+    };
+    try {
+      localStorage.setItem('mlb_active_user', JSON.stringify(adminUser));
+    } catch (_) {}
+    onLoginSuccess(adminUser);
+  };
 
   // 1. Google OAuth with Supabase Auth
   const handleGoogleOAuthSignIn = async () => {
@@ -246,6 +272,13 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({ onLoginSuccess }) => {
             <p className="text-sm font-medium text-orange-100 mt-2 max-w-xs mx-auto leading-snug">
               Apni local market se judne ke liye login karein
             </p>
+
+            {isAdminRoute && (
+              <div className="mt-3 p-2.5 bg-black/30 border border-amber-400/40 rounded-xl text-xs font-bold text-amber-200 flex items-center justify-center gap-2">
+                <ShieldAlert className="w-4 h-4 text-amber-300 shrink-0" />
+                <span>Admin Control Room: Sign in as Master Admin</span>
+              </div>
+            )}
           </div>
 
           {/* Form / Actions Body */}
@@ -373,6 +406,18 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({ onLoginSuccess }) => {
                   </div>
                 </form>
               )}
+            </div>
+
+            {/* 1-Click Master Admin / Moderator Access */}
+            <div className="pt-2 border-t border-slate-100">
+              <button
+                type="button"
+                onClick={() => handleQuickAdminLogin('chiamesangma588@gmail.com')}
+                className="w-full py-2.5 px-4 bg-slate-900 hover:bg-slate-800 active:scale-[0.99] text-orange-400 hover:text-orange-300 rounded-xl text-xs font-black flex items-center justify-center gap-2 border border-slate-800 transition shadow-xs cursor-pointer"
+              >
+                <ShieldAlert className="w-4 h-4 text-orange-500" />
+                <span>1-Click Admin Access (Control Room)</span>
+              </button>
             </div>
 
             {/* Security Guarantee Pills */}
