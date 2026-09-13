@@ -43,37 +43,33 @@ export const GoogleAuthModal: React.FC<GoogleAuthModalProps> = ({
 
   if (!isOpen && !isStandaloneScreen) return null;
 
-  // 1. Google OAuth Provider - Direct Authenticated Session (Keeps user on current updated app)
+  // 1. Google OAuth / Fast Sign-In Provider
   const handleGoogleOAuthSignIn = async () => {
-    setLoading(true);
-    setError(null);
-
-    setTimeout(() => {
-      const defaultEmail = 'chiamesangma588@gmail.com';
-      const userProfile: UserProfile = {
-        id: 'a0eebc99-9c0b-4ef8-bb6d-6bb9bd380001',
-        email: defaultEmail,
-        full_name: 'Chiame Sangma',
-        avatar_url: `https://api.dicebear.com/7.x/initials/svg?seed=ChiameSangma&backgroundColor=ea580c,059669`,
-        phone: '9876543210',
-        city: 'Tura, Meghalaya',
-        state: 'Meghalaya',
-        role: 'super_admin',
-        is_pro: true,
-        pro_status: 'active',
-        is_delivery_partner: false,
-        partner_status: 'none',
-        created_at: new Date().toISOString(),
-      };
-
+    // If Supabase OAuth is ready, initiate it; otherwise show email input directly
+    if (supabase) {
       try {
-        localStorage.setItem('mlb_active_user', JSON.stringify(userProfile));
-      } catch (_) {}
+        setLoading(true);
+        const currentOrigin =
+          typeof window !== 'undefined' && window.location?.origin
+            ? window.location.origin
+            : window.location.href.split('#')[0].split('?')[0];
 
-      setLoading(false);
-      onLoginSuccess(userProfile);
-      onClose();
-    }, 200);
+        const { data, error: oauthError } = await supabase.auth.signInWithOAuth({
+          provider: 'google',
+          options: {
+            redirectTo: currentOrigin,
+          },
+        });
+
+        if (!oauthError && data?.url) {
+          window.location.href = data.url;
+          return;
+        }
+      } catch (_) {}
+    }
+    // Fallback: prompt for user's Google email
+    setShowManualForm(true);
+    setLoading(false);
   };
 
   // 2. Direct Supabase Auth (Email / Password / Auto-Registration)
@@ -155,11 +151,7 @@ export const GoogleAuthModal: React.FC<GoogleAuthModalProps> = ({
         .eq('id', authUser.id)
         .maybeSingle();
 
-      const isUserAdmin =
-        cleanEmail === 'silgrakmarak1309@gmail.com' ||
-        cleanEmail === 'merilocalbazaar@gmail.com' ||
-        cleanEmail === 'chiamesangma588@gmail.com' ||
-        existingProfile?.role === 'admin';
+      const isUserAdmin = cleanEmail === 'silgrakmarak1309@gmail.com';
 
       const userProfile: UserProfile = {
         id: authUser.id, // TRUE SUPABASE AUTH UUID

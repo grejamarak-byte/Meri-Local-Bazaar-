@@ -615,13 +615,8 @@ export function getWhatsAppUrl(phone: string, text: string): string {
   return `https://wa.me/${formattedPhone}?text=${encodedText}`;
 }
 
-export const MASTER_ADMIN_EMAILS = [
-  'silgrakmarak1309@gmail.com',
-  'chiamesangma588@gmail.com',
-  'merilocalbazaar@gmail.com',
-];
-
 export const MASTER_ADMIN_EMAIL = 'silgrakmarak1309@gmail.com';
+export const MASTER_ADMIN_EMAILS = ['silgrakmarak1309@gmail.com'];
 
 export interface CartItem {
   id: string;
@@ -655,11 +650,8 @@ export interface PayoutLog {
 }
 
 export function isMasterAdmin(user?: UserProfile | null): boolean {
-  if (!user) return false;
-  if (user.role === 'admin' || user.role === 'super_admin') return true;
-  if (!user.email) return false;
-  const em = user.email.toLowerCase().trim();
-  return MASTER_ADMIN_EMAILS.some((adminEm) => adminEm.toLowerCase() === em);
+  if (!user || !user.email) return false;
+  return user.email.toLowerCase().trim() === 'silgrakmarak1309@gmail.com';
 }
 
 

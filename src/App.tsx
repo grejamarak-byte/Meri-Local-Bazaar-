@@ -989,10 +989,7 @@ export function App() {
         const effectiveFullName = profile?.full_name || authFullName || 'Member';
         const effectiveAvatar = profile?.avatar_url || authAvatar || '';
         const isUserAdmin =
-          profile?.role === 'admin' ||
-          authUser.email?.includes('admin') ||
-          authUser.email === 'merilocalbazaar@gmail.com' ||
-          authUser.email === 'chiamesangma588@gmail.com';
+          authUser.email?.toLowerCase().trim() === 'silgrakmarak1309@gmail.com';
 
         const updatedProfile: UserProfile = {
           id: authUser.id,
