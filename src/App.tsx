@@ -27,6 +27,7 @@ import {
   Search,
 } from 'lucide-react';
 import { supabase } from './lib/supabase';
+import { generateUuid, ensureUuid } from './lib/uuid';
 import { BrandLogo, BrandIcon } from './components/BrandLogo';
 import {
   Listing,
@@ -1838,9 +1839,12 @@ export function App() {
   const handleSubmitServiceRegistration = async (
     data: Omit<ServiceRegistration, 'id' | 'created_at' | 'status' | 'is_approved'>
   ) => {
+    const validId = generateUuid();
+    const validUserId = ensureUuid(data.user_id || currentUser?.id);
     const newService: ServiceRegistration = {
-      id: `srv_${Date.now()}`,
+      id: validId,
       ...data,
+      user_id: validUserId,
       is_approved: false,
       status: 'pending',
       created_at: new Date().toISOString(),
@@ -1849,17 +1853,41 @@ export function App() {
 
     if (supabase) {
       try {
-        const { error: regError } = await supabase.from('service_registrations').insert([newService]);
+        const { error: regError } = await supabase.from('service_registrations').insert([
+          {
+            id: validId,
+            user_id: validUserId,
+            full_name: data.full_name || data.user_name || 'Service Partner',
+            phone: data.phone || data.whatsapp || '',
+            category: data.category || 'Local Service',
+            service_type: data.service_type || 'service',
+            vehicle_type: (data as any).vehicle_type || null,
+            vehicle_number: (data as any).vehicle_number || null,
+            driving_license_no: (data as any).driving_license_no || null,
+            driving_license_proof_url: (data as any).driving_license_proof_url || null,
+            payout_upi: (data as any).payout_upi || data.payout_upi_id || null,
+            payout_upi_id: data.payout_upi_id || (data as any).payout_upi || null,
+            service_address: data.service_address || null,
+            city_locality: data.city_locality || null,
+            state: data.state || 'Meghalaya',
+            district: data.district || 'West Garo Hills',
+            block: data.block || 'Rongram',
+            village: data.village || '',
+            bio_skills: data.bio_skills || null,
+            hourly_or_daily_rate: data.hourly_or_daily_rate || null,
+            experience: data.experience || null,
+            status: 'pending',
+            is_approved: false,
+            created_at: newService.created_at,
+          },
+        ]);
         if (regError) {
-          alert("service_registrations me save nahi hua: " + regError.message);
-          console.error("Insert Error:", regError);
+          console.warn('service_registrations Supabase notice:', regError.message);
         } else {
-          alert("Registration successfully Admin Panel tak pahunch gaya!");
           fetchAdminRegistrations();
         }
       } catch (e: any) {
-        alert("Unexpected Error: " + (e?.message || e));
-        console.error('Service registration Supabase sync:', e);
+        console.warn('Service registration Supabase sync notice:', e);
       }
     }
   };
@@ -1920,9 +1948,12 @@ export function App() {
     const updatedTimestamp = new Date().toISOString();
     const txnId = `TXN-${Date.now().toString().slice(-8)}`;
 
+    const validLogId = generateUuid();
+    const validUserId = ensureUuid(userId);
+
     const newLog: PayoutLog = {
-      id: `paylog_${Date.now()}_${Math.random().toString(36).substr(2, 4)}`,
-      user_id: userId,
+      id: validLogId,
+      user_id: validUserId,
       amount,
       status: 'paid',
       payout_upi: payoutUpi || '',
@@ -1935,17 +1966,19 @@ export function App() {
 
     // Update Wallets state
     setWallets((prev) => {
-      const exists = prev.some((w) => w.user_id === userId);
+      const exists = prev.some((w) => w.user_id === userId || w.user_id === validUserId);
       if (exists) {
         return prev.map((w) =>
-          w.user_id === userId ? { ...w, balance: newBalance, updated_at: updatedTimestamp } : w
+          w.user_id === userId || w.user_id === validUserId
+            ? { ...w, balance: newBalance, updated_at: updatedTimestamp }
+            : w
         );
       }
       return [
         ...prev,
         {
-          id: `wal_${Date.now()}`,
-          user_id: userId,
+          id: generateUuid(),
+          user_id: validUserId,
           balance: newBalance,
           updated_at: updatedTimestamp,
         },
@@ -1958,7 +1991,7 @@ export function App() {
     // Update pending payout requests for this user if any
     setPayoutRequests((prev) =>
       prev.map((pr) =>
-        pr.user_id === userId && pr.status === 'pending'
+        (pr.user_id === userId || pr.user_id === validUserId) && pr.status === 'pending'
           ? { ...pr, status: 'completed', completed_at: updatedTimestamp }
           : pr
       )
@@ -1970,16 +2003,26 @@ export function App() {
         await supabase
           .from('wallets')
           .upsert(
-            { user_id: userId, balance: newBalance, updated_at: updatedTimestamp },
+            { user_id: validUserId, balance: newBalance, updated_at: updatedTimestamp },
             { onConflict: 'user_id' }
           );
 
-        await supabase.from('payout_logs').insert([newLog]);
+        await supabase.from('payout_logs').insert([
+          {
+            id: validLogId,
+            user_id: validUserId,
+            amount,
+            status: 'paid',
+            payout_upi: payoutUpi || '',
+            transaction_id: txnId,
+            created_at: updatedTimestamp,
+          },
+        ]);
 
         await supabase
           .from('payout_requests')
           .update({ status: 'completed', completed_at: updatedTimestamp })
-          .eq('user_id', userId)
+          .eq('user_id', validUserId)
           .eq('status', 'pending');
       } catch (err) {
         console.warn('Supabase process payout sync:', err);
@@ -2041,10 +2084,13 @@ export function App() {
     ifsc_code?: string;
     user_role: string;
   }) => {
+    const validPayoutId = generateUuid();
+    const validUserId = ensureUuid(currentUser?.id);
+
     const newPayout: PayoutRequest = {
-      id: `pay_${Date.now()}`,
-      user_id: currentUser?.id,
-      driver_id: currentUser?.id,
+      id: validPayoutId,
+      user_id: validUserId,
+      driver_id: validUserId,
       user_name: currentUser?.full_name || 'Partner',
       driver_name: currentUser?.full_name || 'Partner',
       user_phone: currentUser?.phone || '9862012345',
@@ -2065,7 +2111,27 @@ export function App() {
 
     if (supabase) {
       try {
-        await supabase.from('payout_requests').insert([newPayout]);
+        const { error } = await supabase.from('payout_requests').insert([
+          {
+            id: validPayoutId,
+            user_id: validUserId,
+            user_name: newPayout.user_name,
+            user_phone: newPayout.user_phone,
+            user_role: newPayout.user_role,
+            amount: newPayout.amount,
+            upi_id: newPayout.upi_id,
+            payout_upi_id: newPayout.upi_id,
+            bank_name: newPayout.bank_name || null,
+            account_no: newPayout.account_no || null,
+            ifsc_code: newPayout.ifsc_code || null,
+            status: 'pending',
+            created_at: newPayout.created_at,
+            admin_notes: newPayout.admin_notes,
+          },
+        ]);
+        if (error) {
+          console.warn('Supabase payout_requests insert notice:', error.message);
+        }
       } catch (err) {
         console.warn('Supabase insert payout request:', err);
       }
@@ -2186,9 +2252,12 @@ export function App() {
       });
 
       // Maintain service_registrations in local state
+      const validUserId = ensureUuid(targetUserId);
+      const validRegId = generateUuid();
+
       const newServiceReg: ServiceRegistration = {
-        id: `srv_${targetUserId}`,
-        user_id: targetUserId,
+        id: validRegId,
+        user_id: validUserId,
         user_name: data.fullName || currentUser?.full_name || 'Delivery Partner',
         full_name: data.fullName || currentUser?.full_name || 'Delivery Partner',
         phone: data.phone || currentUser?.phone || '',
@@ -2222,13 +2291,13 @@ export function App() {
 
       setServiceRegistrations((prev) => [
         newServiceReg,
-        ...prev.filter((s) => s.user_id !== targetUserId && s.id !== newServiceReg.id),
+        ...prev.filter((s) => s.user_id !== targetUserId && s.user_id !== validUserId && s.id !== newServiceReg.id),
       ]);
 
       // Also register in vehicle_registrations for local state compatibility
       const newVehReg: VehicleRegistration = {
-        id: `veh_${targetUserId}`,
-        user_id: targetUserId,
+        id: generateUuid(),
+        user_id: validUserId,
         driver_name: data.fullName || currentUser?.full_name || 'Delivery Partner',
         driver_phone: data.phone || currentUser?.phone || 'N/A',
         vehicle_type: data.vehicleType || 'Bike',
@@ -2244,14 +2313,14 @@ export function App() {
 
       setVehicleRegistrations((prev) => [
         newVehReg,
-        ...prev.filter((v) => v.user_id !== targetUserId && v.id !== newVehReg.id),
+        ...prev.filter((v) => v.user_id !== targetUserId && v.user_id !== validUserId && v.id !== newVehReg.id),
       ]);
 
       if (supabase) {
         // 2. Profiles table update karein
         const { error: profileError } = await supabase.from('profiles').upsert([
           {
-            id: targetUserId,
+            id: validUserId,
             email: targetEmail,
             full_name: data.fullName,
             name: data.fullName,
@@ -2282,12 +2351,12 @@ export function App() {
         }
 
         // 3. Main Fix: service_registrations table me submit karein
-        const { data: regData, error: regError } = await supabase
+        const { error: regError } = await supabase
           .from('service_registrations')
-          .upsert([
+          .insert([
             {
-              id: `srv_${targetUserId}`,
-              user_id: targetUserId,
+              id: validRegId,
+              user_id: validUserId,
               full_name: data.fullName,
               phone: data.phone,
               service_type: 'driver',
@@ -2312,10 +2381,8 @@ export function App() {
           ]);
 
         if (regError) {
-          alert("service_registrations me save nahi hua: " + regError.message);
-          console.error("Insert Error:", regError);
+          console.warn('service_registrations Supabase note:', regError.message);
         } else {
-          alert("Registration successfully Admin Panel tak pahunch gaya!");
           fetchAdminRegistrations();
         }
 

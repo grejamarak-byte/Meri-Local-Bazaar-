@@ -18,6 +18,8 @@ import { supabase } from '../lib/supabase';
 import { Listing, LocalAddressFields } from '../types';
 import { LocalAddressSelector, LocalAddressState } from './LocalAddressSelector';
 
+import { generateUuid, ensureUuid } from '../lib/uuid';
+
 interface ListingSubmissionViewProps {
   onSuccess: (newListing: Listing) => void;
   onCancel: () => void;
@@ -254,8 +256,11 @@ export const ListingSubmissionView: React.FC<ListingSubmissionViewProps> = ({
 
     const finalLocationName = location.trim() || `${locationState.village ? locationState.village + ', ' : ''}${locationState.block}, ${locationState.district}`;
 
+    const finalListingId = generateUuid();
+    const finalSellerId = ensureUuid(userId);
+
     const listingPayload: Listing = {
-      id: `ad_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`,
+      id: finalListingId,
       title: title.trim(),
       category_name: category,
       location_name: finalLocationName,
@@ -273,7 +278,7 @@ export const ListingSubmissionView: React.FC<ListingSubmissionViewProps> = ({
       is_featured: isProUser,
       is_pro: isProUser,
       status: 'pending', // Strict moderation requirement
-      seller_id: userId,
+      seller_id: finalSellerId,
       seller_name: userName,
       seller_verified: true,
       views_count: 1,
