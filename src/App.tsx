@@ -755,8 +755,16 @@ export function App() {
     };
   }, []);
 
-  const navigateTo = (route: AppRoute, userTab?: UserNavTab) => {
-    if (route === 'admin' && !isMasterAdmin(currentUser)) {
+  const navigateTo = (route: AppRoute, userTab?: UserNavTab, overrideUser?: UserProfile) => {
+    let effectiveUser = overrideUser || currentUser;
+    if (!effectiveUser) {
+      try {
+        const saved = localStorage.getItem('mlb_active_user');
+        if (saved) effectiveUser = JSON.parse(saved);
+      } catch (_) {}
+    }
+
+    if (route === 'admin' && !isMasterAdmin(effectiveUser)) {
       // Hardcoded Security Lock: Block non-master admin and stay on marketplace
       setCurrentRoute('user');
       setUserActiveTab('marketplace');
@@ -1036,7 +1044,7 @@ export function App() {
     }
   }, []);
 
-  const handleLoginSuccess = (user: UserProfile) => {
+  const handleLoginSuccess = (user: UserProfile, targetRoute?: AppRoute) => {
     setCurrentUser(user);
     try {
       localStorage.setItem('mlb_active_user', JSON.stringify(user));
@@ -1048,8 +1056,17 @@ export function App() {
       }
       return [user, ...prev];
     });
-    // Automatically redirect to marketplace post-login
-    setUserActiveTab('marketplace');
+
+    if (
+      targetRoute === 'admin' ||
+      currentRoute === 'admin' ||
+      (typeof window !== 'undefined' && window.location.pathname.includes('/admin'))
+    ) {
+      navigateTo('admin', undefined, user);
+    } else {
+      setUserActiveTab('marketplace');
+    }
+
     if (pendingAuthAction) {
       pendingAuthAction();
       setPendingAuthAction(null);
@@ -2754,7 +2771,13 @@ export function App() {
   // User cannot access Marketplace listings, categories, or dashboards until login
   // =========================================================================
   if (!currentUser) {
-    return <LoginScreen onLoginSuccess={handleLoginSuccess} isAdminRoute={currentRoute === 'admin'} />;
+    return (
+      <LoginScreen
+        onLoginSuccess={handleLoginSuccess}
+        onNavigateToAdmin={() => navigateTo('admin')}
+        isAdminRoute={currentRoute === 'admin'}
+      />
+    );
   }
 
   // =========================================================================

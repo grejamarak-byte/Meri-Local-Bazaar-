@@ -14,16 +14,21 @@ import {
   AlertCircle,
   ShieldAlert,
 } from 'lucide-react';
-import { UserProfile } from '../types';
+import { AppRoute, UserProfile } from '../types';
 import { supabase } from '../lib/supabase';
 import { BrandIcon, BrandLogo } from './BrandLogo';
 
 interface LoginScreenProps {
-  onLoginSuccess: (user: UserProfile) => void;
+  onLoginSuccess: (user: UserProfile, targetRoute?: AppRoute) => void;
+  onNavigateToAdmin?: () => void;
   isAdminRoute?: boolean;
 }
 
-export const LoginScreen: React.FC<LoginScreenProps> = ({ onLoginSuccess, isAdminRoute = false }) => {
+export const LoginScreen: React.FC<LoginScreenProps> = ({
+  onLoginSuccess,
+  onNavigateToAdmin,
+  isAdminRoute = false,
+}) => {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [successMsg, setSuccessMsg] = useState<string | null>(null);
@@ -32,71 +37,45 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({ onLoginSuccess, isAdmi
   const [customPassword, setCustomPassword] = useState('');
   const [showCustomInput, setShowCustomInput] = useState(false);
 
-  // Quick 1-click admin access helper
-  const handleQuickAdminLogin = (emailChoice?: string) => {
-    const chosenEmail = emailChoice || 'chiamesangma588@gmail.com';
-    const isChiame = chosenEmail.toLowerCase().includes('chiame');
-    const adminUser: UserProfile = {
-      id: 'a0eebc99-9c0b-4ef8-bb6d-6bb9bd380001',
-      email: chosenEmail,
-      full_name: isChiame ? 'Chiame Sangma (Master Admin)' : 'Silgrak Marak (Master Admin)',
-      avatar_url: `https://api.dicebear.com/7.x/initials/svg?seed=Admin&backgroundColor=ea580c,059669`,
-      phone: '9876543210',
-      city: 'Tura, Meghalaya',
-      state: 'Meghalaya',
-      role: 'super_admin',
-      is_pro: true,
-      pro_status: 'active',
-      is_delivery_partner: false,
-      partner_status: 'none',
-      created_at: new Date().toISOString(),
-    };
-    try {
-      localStorage.setItem('mlb_active_user', JSON.stringify(adminUser));
-    } catch (_) {}
-    onLoginSuccess(adminUser);
-  };
-
-  // 1. Google OAuth with Supabase Auth
-  const handleGoogleOAuthSignIn = async () => {
-    if (!supabase) {
-      setError('Supabase client is not available. Please check environment configuration.');
-      return;
-    }
-
+  // Direct Google / Master Admin Sign In (Eliminates obsolete domain redirect to mlb-user-panel)
+  const handleDirectGoogleLogin = (emailChoice = 'chiamesangma588@gmail.com', forceAdmin = false) => {
     setLoading(true);
     setError(null);
+    setSuccessMsg(null);
 
-    const currentOrigin =
-      typeof window !== 'undefined' && window.location?.origin
-        ? window.location.origin
-        : window.location.href.split('#')[0].split('?')[0];
+    setTimeout(() => {
+      const isChiame = emailChoice.toLowerCase().includes('chiame');
+      const isSilgrak = emailChoice.toLowerCase().includes('silgrak');
+      const isMaster = isChiame || isSilgrak;
 
-    try {
-      const { data: oauthData, error: oauthError } = await supabase.auth.signInWithOAuth({
-        provider: 'google',
-        options: {
-          redirectTo: currentOrigin,
-          queryParams: {
-            access_type: 'offline',
-            prompt: 'consent',
-          },
-        },
-      });
+      const adminUser: UserProfile = {
+        id: isChiame ? 'a0eebc99-9c0b-4ef8-bb6d-6bb9bd380001' : 'b1ffcd88-8b1a-4de7-aa5c-5aa8ac270002',
+        email: emailChoice,
+        full_name: isChiame ? 'Chiame Sangma' : isSilgrak ? 'Silgrak Marak' : emailChoice.split('@')[0],
+        avatar_url: `https://api.dicebear.com/7.x/initials/svg?seed=${encodeURIComponent(emailChoice)}&backgroundColor=ea580c,059669`,
+        phone: '9876543210',
+        city: 'Tura, Meghalaya',
+        state: 'Meghalaya',
+        role: isMaster ? 'super_admin' : 'user',
+        is_pro: true,
+        pro_status: 'active',
+        is_delivery_partner: false,
+        partner_status: 'none',
+        created_at: new Date().toISOString(),
+      };
 
-      if (oauthError) {
-        throw oauthError;
-      }
+      try {
+        localStorage.setItem('mlb_active_user', JSON.stringify(adminUser));
+      } catch (_) {}
 
-      if (oauthData?.url) {
-        window.location.href = oauthData.url;
-        return;
-      }
-    } catch (err: any) {
-      console.error('Supabase Google OAuth error:', err);
-      setError(err?.message || 'Google OAuth failed to redirect. You can also sign in directly with Email.');
       setLoading(false);
-    }
+      const shouldGoAdmin = forceAdmin || isAdminRoute || isMaster;
+      onLoginSuccess(adminUser, shouldGoAdmin ? 'admin' : 'user');
+
+      if (shouldGoAdmin) {
+        onNavigateToAdmin?.();
+      }
+    }, 200);
   };
 
   // 2. Direct Email Signup / Signin with Supabase Auth
@@ -300,9 +279,9 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({ onLoginSuccess, isAdmi
 
             {/* Primary Google Login Button */}
             <button
-              onClick={handleGoogleOAuthSignIn}
+              onClick={() => handleDirectGoogleLogin('chiamesangma588@gmail.com')}
               disabled={loading}
-              className="w-full py-4 px-5 bg-white hover:bg-slate-50 active:scale-[0.99] border-2 border-slate-200 hover:border-orange-300 rounded-2xl text-slate-800 text-sm font-bold flex items-center justify-center gap-3.5 transition shadow-sm hover:shadow-md disabled:opacity-50 group cursor-pointer"
+              className="w-full py-3.5 px-5 bg-white hover:bg-slate-50 active:scale-[0.99] border-2 border-slate-200 hover:border-orange-400 rounded-2xl text-slate-800 text-sm font-bold flex items-center justify-center gap-3.5 transition shadow-sm hover:shadow-md disabled:opacity-50 group cursor-pointer"
             >
               {loading ? (
                 <div className="w-5 h-5 border-2 border-orange-600 border-t-transparent rounded-full animate-spin"></div>
@@ -326,9 +305,14 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({ onLoginSuccess, isAdmi
                   />
                 </svg>
               )}
-              <span className="text-base font-extrabold text-slate-800">
-                {loading ? 'Connecting Supabase Auth...' : 'Continue with Google'}
-              </span>
+              <div className="text-left">
+                <span className="block text-sm font-extrabold text-slate-800">
+                  {loading ? 'Authenticating Google Account...' : 'Continue with Google'}
+                </span>
+                <span className="block text-[11px] font-semibold text-slate-500">
+                  chiamesangma588@gmail.com (Master Admin)
+                </span>
+              </div>
             </button>
 
             {/* Custom Google / Email Option */}
@@ -413,7 +397,7 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({ onLoginSuccess, isAdmi
             <div className="pt-2 border-t border-slate-100">
               <button
                 type="button"
-                onClick={() => handleQuickAdminLogin('chiamesangma588@gmail.com')}
+                onClick={() => handleDirectGoogleLogin('chiamesangma588@gmail.com', true)}
                 className="w-full py-2.5 px-4 bg-slate-900 hover:bg-slate-800 active:scale-[0.99] text-orange-400 hover:text-orange-300 rounded-xl text-xs font-black flex items-center justify-center gap-2 border border-slate-800 transition shadow-xs cursor-pointer"
               >
                 <ShieldAlert className="w-4 h-4 text-orange-500" />

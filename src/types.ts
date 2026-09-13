@@ -1,3 +1,5 @@
+export type AppRoute = 'user' | 'admin' | 'delivery_register' | 'delivery_dashboard';
+
 export interface LocalAddressFields {
   state?: string;
   district?: string;
