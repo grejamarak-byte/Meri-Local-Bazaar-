@@ -22,6 +22,8 @@ export interface Listing extends LocalAddressFields {
   whatsapp?: string;
   images_json?: string;
   image_urls?: string[];
+  weight?: string | number;
+  weight_kg?: number;
   is_featured?: boolean;
   is_pro?: boolean;
   is_heavy_item?: boolean;
@@ -388,8 +390,11 @@ export function calculateDeliveryFare(
   appCommission: number;
   partnerEarning: number;
 } {
-  const wt = Math.max(0, weightKg);
-  const km = Math.max(0, distanceKm);
+  // Base delivery starting parameters: "1/2 kg" (0.5 kg) and "1/2 km" (0.5 km)
+  const baseWeightKg = 0.5;
+  const baseDistanceKm = 0.5;
+  const wt = Math.max(baseWeightKg, Number(weightKg) || baseWeightKg);
+  const km = Math.max(baseDistanceKm, Number(distanceKm) || baseDistanceKm);
   let totalFare = 0;
 
   if (terrain === 'Hill (5km/L)') {

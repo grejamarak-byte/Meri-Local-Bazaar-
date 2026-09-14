@@ -535,6 +535,18 @@ export const BuyerOrdersManagement: React.FC<BuyerOrdersManagementProps> = ({
                       <p className="text-xs text-slate-700">
                         Delivery Rider <strong>{order.delivery_partner_name || 'Driver'}</strong> has marked your shipment as delivered. Please verify you have received the items in good condition, then click the button below to confirm.
                       </p>
+
+                      {/* MANDATORY BUYER INSPECTION & DELIVERY RELEASE NOTICE */}
+                      <div className="p-3 bg-amber-50 border border-amber-300 rounded-xl text-xs text-amber-950 space-y-1">
+                        <div className="font-black text-amber-900 flex items-center gap-1.5 text-[11px] uppercase tracking-wide">
+                          <AlertCircle className="w-3.5 h-3.5 text-amber-600 shrink-0" />
+                          <span>IMPORTANT NOTICE TO ALL BUYERS</span>
+                        </div>
+                        <p className="text-[11px] leading-relaxed font-semibold">
+                          Every buyer must thoroughly inspect the ordered product, its physical condition, and the expiry date BEFORE confirming the delivery. Once you confirm the delivery, the payment is released, and the platform will not be able to offer any refunds, support, or help under any circumstances.
+                        </p>
+                      </div>
+
                       <button
                         onClick={() => handleConfirmClick(order)}
                         disabled={confirmingId === order.id}

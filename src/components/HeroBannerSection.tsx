@@ -12,8 +12,8 @@ interface HeroBannerSectionProps {
   banners: BannerAd[];
 }
 
-export const HeroBannerSection: React.FC<HeroBannerSectionProps> = ({ banners }) => {
-  const activeBanners = banners.filter((b) => b.is_active);
+export const HeroBannerSection: React.FC<HeroBannerSectionProps> = ({ banners = [] }) => {
+  const activeBanners = (banners || []).filter((b) => b && b.is_active);
   const [currentIndex, setCurrentIndex] = useState(0);
   const [isPaused, setIsPaused] = useState(false);
   const touchStartX = useRef<number | null>(null);
@@ -182,7 +182,7 @@ export const HeroBannerSection: React.FC<HeroBannerSectionProps> = ({ banners })
 
           {/* Dots Indicator */}
           <div className="absolute bottom-2 left-1/2 -translate-x-1/2 flex items-center gap-1.5 z-10">
-            {activeBanners.map((_, idx) => (
+            {activeBanners?.map((_, idx) => (
               <button
                 key={idx}
                 type="button"

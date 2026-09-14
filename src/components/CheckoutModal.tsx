@@ -12,6 +12,7 @@ import {
   CreditCard,
   Lock,
   Info,
+  AlertCircle,
   ArrowRight,
   Sparkles,
   FileText,
@@ -85,9 +86,10 @@ export const CheckoutModal: React.FC<CheckoutModalProps> = ({
   const [policyModalOpen, setPolicyModalOpen] = useState(false);
   const [selectedPolicyType, setSelectedPolicyType] = useState<PolicyType>('terms_conditions');
 
-  // Delivery estimation for home delivery
-  const [weightKg, setWeightKg] = useState<number>(3);
-  const [distanceKm, setDistanceKm] = useState<number>(5);
+  // Delivery estimation for home delivery (starting parameters: 1/2 kg, 1/2 km)
+  const initialWeight = listing?.weight_kg || (listing?.weight ? parseFloat(String(listing.weight)) : 0.5) || 0.5;
+  const [weightKg, setWeightKg] = useState<number>(initialWeight);
+  const [distanceKm, setDistanceKm] = useState<number>(0.5);
   const [terrain, setTerrain] = useState<'Plain' | 'Hill (5km/L)'>('Hill (5km/L)');
 
   // Advance Payment Verification Inputs
@@ -386,6 +388,17 @@ export const CheckoutModal: React.FC<CheckoutModalProps> = ({
               <Info className="w-4 h-4 text-blue-600 shrink-0 mt-0.5" />
               <p>
                 Jab tak Admin aapke UTR number aur screenshot ko verify nahi karta, tab tak order status <strong>'Pending Verification'</strong> rahega. Approval ke baad seller dispatch karega.
+              </p>
+            </div>
+
+            {/* MANDATORY BUYER INSPECTION & DELIVERY NOTICE */}
+            <div className="bg-amber-50 border-2 border-amber-400/80 rounded-2xl p-4 text-xs text-amber-950 text-left max-w-md mx-auto space-y-1.5 shadow-sm">
+              <div className="flex items-center gap-2 font-black text-amber-900 uppercase tracking-wide">
+                <AlertCircle className="w-4 h-4 text-amber-700 shrink-0" />
+                <span>IMPORTANT NOTICE TO ALL BUYERS</span>
+              </div>
+              <p className="leading-relaxed font-semibold">
+                Every buyer must thoroughly inspect the ordered product, its physical condition, and the expiry date BEFORE confirming the delivery. Once you confirm the delivery, the payment is released, and the platform will not be able to offer any refunds, support, or help under any circumstances.
               </p>
             </div>
 
@@ -782,6 +795,17 @@ export const CheckoutModal: React.FC<CheckoutModalProps> = ({
                   Aapka payment Admin ke escrow account mein safe rehta hai. Delivery ya pickup complete hone par hi seller ko payout release kiya jata hai.
                 </p>
               </div>
+            </div>
+
+            {/* MANDATORY BUYER INSPECTION & DELIVERY NOTICE */}
+            <div className="p-3.5 bg-amber-50/90 border-2 border-amber-300 rounded-2xl text-xs text-amber-950 space-y-1.5 shadow-xs">
+              <div className="flex items-center gap-1.5 font-black text-amber-900 uppercase tracking-wide text-[11px]">
+                <AlertCircle className="w-4 h-4 text-amber-700 shrink-0" />
+                <span>IMPORTANT NOTICE TO ALL BUYERS</span>
+              </div>
+              <p className="text-[11px] leading-relaxed font-semibold">
+                Every buyer must thoroughly inspect the ordered product, its physical condition, and the expiry date BEFORE confirming the delivery. Once you confirm the delivery, the payment is released, and the platform will not be able to offer any refunds, support, or help under any circumstances.
+              </p>
             </div>
 
             {/* MANDATORY TERMS & PRIVACY CONSENT CHECKBOX (UNCHECKED BY DEFAULT) */}

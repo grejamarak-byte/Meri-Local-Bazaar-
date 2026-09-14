@@ -45,6 +45,11 @@ export const DEFAULT_TERMS_CONDITIONS = `
 
 ### 5. Dispute Resolution
 For any dispute, missing item, or seller grievance, users can contact the Meri Local Bazaar Admin Support via WhatsApp or official email.
+
+---
+
+### 6. Mandatory Inspection & Delivery Release Notice
+**IMPORTANT NOTICE TO ALL BUYERS:** Every buyer must thoroughly inspect the ordered product, its physical condition, and the expiry date BEFORE confirming the delivery. Once you confirm the delivery, the payment is released, and the platform will not be able to offer any refunds, support, or help under any circumstances.
 `;
 
 export const DEFAULT_PRIVACY_POLICY = `

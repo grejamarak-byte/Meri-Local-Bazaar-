@@ -91,6 +91,7 @@ export const ListingSubmissionView: React.FC<ListingSubmissionViewProps> = ({
     village: '',
   });
   const [price, setPrice] = useState('');
+  const [weight, setWeight] = useState('');
   const [condition, setCondition] = useState('Used - Like New');
   const [description, setDescription] = useState('');
   const [phone, setPhone] = useState(userPhone);
@@ -102,16 +103,16 @@ export const ListingSubmissionView: React.FC<ListingSubmissionViewProps> = ({
   const [error, setError] = useState<string | null>(null);
 
   // STRICT SUPABASE DIRECT DATABASE PLAN CHECK STATE:
-  const [isCheckingDb, setIsCheckingDb] = useState<boolean>(true);
-  const [livePlanStatus, setLivePlanStatus] = useState<string>('checking');
-  const [isLiveActive, setIsLiveActive] = useState<boolean>(false);
+  const [isCheckingDb, setIsCheckingDb] = useState<boolean>(!isProUser);
+  const [livePlanStatus, setLivePlanStatus] = useState<string>(isProUser ? 'active' : 'checking');
+  const [isLiveActive, setIsLiveActive] = useState<boolean>(Boolean(isProUser));
   const [showProModal, setShowProModal] = useState<boolean>(false);
   const [livePlanExpiry, setLivePlanExpiry] = useState<string | null>(null);
 
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   // Direct Supabase query against profiles table to bypass all session cache and local state delays
-  const verifyPlanDirectFromSupabase = async (triggerModalOnInactive = true): Promise<boolean> => {
+  const verifyPlanDirectFromSupabase = async (triggerModalOnInactive = false): Promise<boolean> => {
     setIsCheckingDb(true);
     try {
       const res = await checkUserPlanStatusDirect({
@@ -121,7 +122,14 @@ export const ListingSubmissionView: React.FC<ListingSubmissionViewProps> = ({
       });
 
       const active = Boolean(
-        res.isActive && (res.planStatus === 'active' || res.isPro === true)
+        res.isActive ||
+        res.planStatus === 'active' ||
+        res.isPro === true ||
+        res.profile?.plan_status === 'active' ||
+        res.profile?.pro_status === 'active' ||
+        res.profile?.is_pro === true ||
+        res.profile?.is_approved_by_admin === true ||
+        isProUser === true
       );
 
       setIsLiveActive(active);
@@ -154,10 +162,10 @@ export const ListingSubmissionView: React.FC<ListingSubmissionViewProps> = ({
     }
   };
 
-  // Check live status on mount
+  // Check live status on mount (do not show modal if user is already pro/active)
   useEffect(() => {
-    verifyPlanDirectFromSupabase(true);
-  }, [userId, userEmail, userPhone]);
+    verifyPlanDirectFromSupabase(!isProUser);
+  }, [userId, userEmail, userPhone, isProUser]);
 
   const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const files = e.target.files;
@@ -352,6 +360,9 @@ export const ListingSubmissionView: React.FC<ListingSubmissionViewProps> = ({
     const finalListingId = generateUuid();
     const finalSellerId = ensureUuid(userId);
 
+    const numericWeightMatch = weight.match(/[0-9]+(?:\.[0-9]+)?/);
+    const parsedWeightKg = numericWeightMatch ? parseFloat(numericWeightMatch[0]) : 0.5;
+
     const listingPayload: Listing = {
       id: finalListingId,
       title: title.trim(),
@@ -362,6 +373,8 @@ export const ListingSubmissionView: React.FC<ListingSubmissionViewProps> = ({
       block: locationState.block,
       village: locationState.village,
       price: parseFloat(price),
+      weight: weight.trim() || `${parsedWeightKg} kg`,
+      weight_kg: parsedWeightKg > 0 ? parsedWeightKg : 0.5,
       condition,
       description: description.trim(),
       phone: phone.trim(),
@@ -736,6 +749,19 @@ export const ListingSubmissionView: React.FC<ListingSubmissionViewProps> = ({
               placeholder="e.g. 145000"
               value={price}
               onChange={(e) => setPrice(e.target.value)}
+              className="w-full px-4 py-2.5 rounded-xl border border-slate-300 bg-white text-slate-900 font-bold placeholder:text-slate-400 placeholder:font-normal text-sm focus:ring-2 focus:ring-orange-500/20 focus:border-orange-500 focus:outline-none"
+            />
+          </div>
+
+          <div>
+            <label className="block text-xs font-bold text-slate-800 uppercase tracking-wider mb-1.5">
+              Weight
+            </label>
+            <input
+              type="text"
+              placeholder="e.g. 0.5 kg, 1 kg"
+              value={weight}
+              onChange={(e) => setWeight(e.target.value)}
               className="w-full px-4 py-2.5 rounded-xl border border-slate-300 bg-white text-slate-900 font-bold placeholder:text-slate-400 placeholder:font-normal text-sm focus:ring-2 focus:ring-orange-500/20 focus:border-orange-500 focus:outline-none"
             />
           </div>

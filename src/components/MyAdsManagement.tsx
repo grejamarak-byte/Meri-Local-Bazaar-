@@ -54,37 +54,44 @@ export const MyAdsManagement: React.FC<MyAdsManagementProps> = ({
   const [filter, setFilter] = useState<'all' | 'active' | 'pending' | 'rejected'>('all');
   const [isPayoutModalOpen, setIsPayoutModalOpen] = useState(false);
 
-  const filtered = myListings.filter((l) => {
+  const filtered = (myListings || []).filter((l) => {
     if (filter === 'all') return true;
     return l.status === filter;
   });
 
   // Calculate real-time earnings and wallet statistics
-  const userPayouts = payoutRequests.filter(
+  const userPayouts = (payoutRequests || []).filter(
     (p) =>
       (currentUser && (p.driver_id === currentUser.id || p.driver_phone === currentUser.phone || p.user_id === currentUser.id || p.user_phone === currentUser.phone)) ||
       (currentUser && (p.driver_name === currentUser.full_name || p.user_name === currentUser.full_name))
   );
 
-  const pendingPayoutAmount = userPayouts
+  const pendingPayoutAmount = (userPayouts || [])
     .filter((p) => p.status === 'pending')
     .reduce((sum, p) => sum + (p.amount || 0), 0);
 
-  const completedPayoutAmount = userPayouts
+  const completedPayoutAmount = (userPayouts || [])
     .filter((p) => p.status === 'approved' || p.status === 'completed')
     .reduce((sum, p) => sum + (p.amount || 0), 0);
 
   // Active listings inventory value
-  const totalListingsValue = myListings
+  const totalListingsValue = (myListings || [])
     .filter((l) => l.status === 'active')
     .reduce((sum, l) => sum + (l.price || 0), 0);
 
-  // Real-time sales earnings from fulfilled orders
-  const myCompletedSales = (orders || []).filter(
+  // Real-time seller orders & sales earnings from orders table
+  const mySellerOrders = (orders || []).filter(
     (o) =>
       currentUser &&
-      (o.seller_phone === currentUser.phone || o.seller_name === currentUser.full_name) &&
-      (o.status === 'success' || o.status === 'delivered')
+      ((o as any).seller_id === currentUser.id ||
+       o.seller_phone === currentUser.phone ||
+       o.seller_name === currentUser.full_name ||
+       (o as any).shop_name === currentUser.shop_name)
+  );
+  const totalOrdersCount = mySellerOrders.length;
+
+  const myCompletedSales = mySellerOrders.filter(
+    (o) => o.status === 'success' || o.status === 'delivered'
   );
   const totalSalesRevenue = myCompletedSales.reduce((sum, o) => sum + (o.product_price || o.total_paid || o.total_fare || 0), 0);
 
@@ -111,7 +118,7 @@ export const MyAdsManagement: React.FC<MyAdsManagementProps> = ({
             <div className="flex items-center gap-2 flex-wrap">
               <span className="text-[10px] font-extrabold uppercase tracking-widest bg-orange-500/20 text-orange-400 border border-orange-500/40 px-3 py-1 rounded-full flex items-center gap-1.5">
                 <Wallet className="w-3.5 h-3.5" />
-                Seller Earnings Wallet
+                Seller Dashboard & Wallet
               </span>
               <span className="text-[10px] font-bold text-slate-400 bg-slate-800/80 px-2.5 py-1 rounded-full border border-slate-700">
                 {currentUser?.shop_name || 'Verified Merchant Store'}
@@ -120,18 +127,23 @@ export const MyAdsManagement: React.FC<MyAdsManagementProps> = ({
 
             <div>
               <div className="text-xs text-slate-400 uppercase tracking-wider font-semibold">
-                Available Wallet Balance
+                Wallet Balance
               </div>
-              <div className="text-3xl sm:text-4xl font-black text-white font-mono tracking-tight mt-1 flex items-baseline gap-2">
-                <span className="text-orange-400">₹</span>
-                <span>{formatPrice(availableWalletBalance)}</span>
+              <div className="text-2xl sm:text-4xl font-black text-white font-mono tracking-tight mt-1 flex flex-wrap items-baseline gap-2">
+                <span className="text-orange-400">Balance: ₹{availableWalletBalance.toFixed(2)}</span>
                 <span className="text-xs text-emerald-400 font-sans font-bold bg-emerald-950/80 border border-emerald-800/60 px-2 py-0.5 rounded-md">
                   100% Guaranteed Settlement
                 </span>
               </div>
             </div>
 
-            <div className="grid grid-cols-2 sm:grid-cols-3 gap-3 pt-2 text-xs">
+            <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 pt-2 text-xs">
+              <div className="bg-slate-800/60 border border-slate-700/60 rounded-xl p-2.5">
+                <div className="text-[10px] text-slate-400 font-bold uppercase">Total Orders Count</div>
+                <div className="text-sm font-black text-amber-400 mt-0.5">
+                  {totalOrdersCount}
+                </div>
+              </div>
               <div className="bg-slate-800/60 border border-slate-700/60 rounded-xl p-2.5">
                 <div className="text-[10px] text-slate-400 font-bold uppercase">Active Ads Catalog</div>
                 <div className="text-sm font-black text-white mt-0.5">
@@ -144,7 +156,7 @@ export const MyAdsManagement: React.FC<MyAdsManagementProps> = ({
                   ₹{formatPrice(pendingPayoutAmount)}
                 </div>
               </div>
-              <div className="bg-slate-800/60 border border-slate-700/60 rounded-xl p-2.5 col-span-2 sm:col-span-1">
+              <div className="bg-slate-800/60 border border-slate-700/60 rounded-xl p-2.5">
                 <div className="text-[10px] text-slate-400 font-bold uppercase">Total Withdrawn</div>
                 <div className="text-sm font-black text-emerald-400 mt-0.5">
                   ₹{formatPrice(completedPayoutAmount)}
@@ -153,15 +165,15 @@ export const MyAdsManagement: React.FC<MyAdsManagementProps> = ({
             </div>
           </div>
 
-          {/* Right: Interactive Request Payout / Withdraw Action */}
+          {/* Right: Interactive Withdraw Balance Action */}
           <div className="flex flex-col sm:flex-row lg:flex-col gap-3 shrink-0">
             <button
-              id="seller_request_payout_btn"
+              id="seller_withdraw_balance_btn"
               onClick={() => setIsPayoutModalOpen(true)}
               className="px-6 py-3.5 bg-gradient-to-r from-orange-500 to-amber-500 hover:from-orange-600 hover:to-amber-600 text-slate-950 font-black text-xs sm:text-sm rounded-2xl shadow-lg shadow-orange-500/20 transition flex items-center justify-center gap-2 active:scale-95 cursor-pointer"
             >
               <CreditCard className="w-4 h-4 text-slate-950" />
-              <span>Request Payout / Withdraw</span>
+              <span>Withdraw Balance</span>
               <ArrowUpRight className="w-4 h-4 text-slate-950" />
             </button>
 
@@ -207,7 +219,7 @@ export const MyAdsManagement: React.FC<MyAdsManagementProps> = ({
                   : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
               }`}
             >
-              {status} ({myListings.filter((l) => (status === 'all' ? true : l.status === status)).length})
+              {status} ({(myListings || []).filter((l) => (status === 'all' ? true : l.status === status)).length})
             </button>
           ))}
         </div>
@@ -226,7 +238,7 @@ export const MyAdsManagement: React.FC<MyAdsManagementProps> = ({
           </div>
         ) : (
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-            {filtered.map((item) => (
+            {filtered?.map((item) => (
               <div
                 key={item.id}
                 className="border border-slate-200 rounded-2xl p-4 bg-white hover:border-slate-300 transition flex flex-col justify-between space-y-3"
