@@ -1,4 +1,4 @@
-import React, { useState, useRef } from 'react';
+import React, { useState, useRef, useEffect } from 'react';
 import {
   UploadCloud,
   Image as ImageIcon,
@@ -14,8 +14,13 @@ import {
   Sparkles,
   MapPin,
   Loader2,
+  RefreshCw,
+  Store,
+  Car,
+  Briefcase,
+  Users,
 } from 'lucide-react';
-import { supabase } from '../lib/supabase';
+import { supabase, checkUserPlanStatusDirect } from '../lib/supabase';
 import {
   uploadListingImageToStorage,
   dataURLtoBlob,
@@ -33,6 +38,7 @@ interface ListingSubmissionViewProps {
   userPhone?: string;
   userName?: string;
   userId?: string;
+  userEmail?: string;
   isProUser?: boolean;
 }
 
@@ -49,10 +55,11 @@ interface PhotoItem {
 const MAX_PHOTOS = 6;
 
 const CATEGORIES = [
+  'Sellers',
   'Shops',
-  'Local Jobs & Services',
   'Local Cab & Taxi',
   'Travelers & Tour',
+  'Local Jobs & Services',
   'Bike & Auto Rickshaw',
   'Mobiles & Gadgets',
   'Vehicles',
@@ -71,10 +78,11 @@ export const ListingSubmissionView: React.FC<ListingSubmissionViewProps> = ({
   userPhone = '9876543210',
   userName = 'Seller',
   userId = 'usr_seller',
-  isProUser = true,
+  userEmail = '',
+  isProUser = false,
 }) => {
   const [title, setTitle] = useState('');
-  const [category, setCategory] = useState('Mobiles & Gadgets');
+  const [category, setCategory] = useState('Sellers');
   const [location, setLocation] = useState('Tura, Meghalaya');
   const [locationState, setLocationState] = useState<LocalAddressState>({
     state: 'Meghalaya',
@@ -93,7 +101,63 @@ export const ListingSubmissionView: React.FC<ListingSubmissionViewProps> = ({
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
+  // STRICT SUPABASE DIRECT DATABASE PLAN CHECK STATE:
+  const [isCheckingDb, setIsCheckingDb] = useState<boolean>(true);
+  const [livePlanStatus, setLivePlanStatus] = useState<string>('checking');
+  const [isLiveActive, setIsLiveActive] = useState<boolean>(false);
+  const [showProModal, setShowProModal] = useState<boolean>(false);
+  const [livePlanExpiry, setLivePlanExpiry] = useState<string | null>(null);
+
   const fileInputRef = useRef<HTMLInputElement>(null);
+
+  // Direct Supabase query against profiles table to bypass all session cache and local state delays
+  const verifyPlanDirectFromSupabase = async (triggerModalOnInactive = true): Promise<boolean> => {
+    setIsCheckingDb(true);
+    try {
+      const res = await checkUserPlanStatusDirect({
+        userId,
+        email: userEmail,
+        phone: userPhone,
+      });
+
+      const active = Boolean(
+        res.isActive && (res.planStatus === 'active' || res.isPro === true)
+      );
+
+      setIsLiveActive(active);
+      setLivePlanStatus(active ? 'active' : res.planStatus || 'inactive');
+
+      if (res.profile?.plan_expiry_date || res.profile?.pro_expiry) {
+        setLivePlanExpiry(res.profile.plan_expiry_date || res.profile.pro_expiry);
+      }
+
+      if (!active) {
+        if (triggerModalOnInactive) {
+          setShowProModal(true);
+        }
+        return false;
+      } else {
+        setShowProModal(false);
+        return true;
+      }
+    } catch (err) {
+      console.warn('Direct database plan check failed, fallback to prop:', err);
+      const fallback = Boolean(isProUser);
+      setIsLiveActive(fallback);
+      setLivePlanStatus(fallback ? 'active' : 'inactive');
+      if (!fallback && triggerModalOnInactive) {
+        setShowProModal(true);
+      }
+      return fallback;
+    } finally {
+      setIsCheckingDb(false);
+    }
+  };
+
+  // Check live status on mount
+  useEffect(() => {
+    verifyPlanDirectFromSupabase(true);
+  }, [userId, userEmail, userPhone]);
 
   const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const files = e.target.files;
@@ -208,22 +272,30 @@ export const ListingSubmissionView: React.FC<ListingSubmissionViewProps> = ({
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
 
-    // STRICT CLIENT-SIDE 0-FREE-AD BLOCKING:
-    // If the logged-in user has is_pro === false (or is not true), completely block the form submission event.
-    if (!isProUser) {
+    // STRICT SUPABASE DATABASE VALIDATION GUARD:
+    // Execute a direct check against the Supabase database before allowing a post.
+    // If the logged-in user's monthly plan status is NOT active (i.e. plan_status !== 'active'),
+    // block the submission immediately and pop up the "Posting Restricted! PRO Membership Required" modal screen.
+    setSubmitting(true);
+    setError(null);
+
+    const isVerifiedActive = await verifyPlanDirectFromSupabase(true);
+    if (!isVerifiedActive) {
+      setSubmitting(false);
+      setShowProModal(true);
       setError(
-        'Posting Restricted! Free users can only act as Buyers to browse and purchase items. Please upgrade to a PRO Plan to post listings.'
+        'Posting Restricted! PRO Membership Required. Your monthly plan status is currently inactive in the database. Please activate your monthly plan to post listings.'
       );
       return;
     }
 
+    // IF ACTIVE: Bypass all restrictions and allow unlimited listing posts for categories like
+    // Sellers, Cab & Taxi, Travelers, Local Service & Job, and Shops.
     if (!title.trim() || !price || parseFloat(price) <= 0) {
       setError('Please provide a valid listing title and price.');
+      setSubmitting(false);
       return;
     }
-
-    setSubmitting(true);
-    setError(null);
 
     // Upload any pending or un-uploaded photos directly to Supabase Storage bucket "Listing image"
     const uploadedPublicUrls: string[] = [];
@@ -296,8 +368,8 @@ export const ListingSubmissionView: React.FC<ListingSubmissionViewProps> = ({
       whatsapp: whatsapp.trim() || phone.trim(),
       images_json: finalImagesJson,
       image_urls: finalImageUrls,
-      is_featured: isProUser,
-      is_pro: isProUser,
+      is_featured: true,
+      is_pro: true,
       status: 'pending', // Strict moderation requirement
       seller_id: finalSellerId,
       seller_name: userName,
@@ -325,59 +397,106 @@ export const ListingSubmissionView: React.FC<ListingSubmissionViewProps> = ({
 
   const activePhoto = photos[activePhotoIndex] || photos[0];
 
+  const shouldBlockPosting = !isCheckingDb && (!isLiveActive || showProModal);
+
   return (
     <div className="max-w-2xl mx-auto bg-white rounded-3xl shadow-sm border border-slate-200 overflow-hidden relative">
-      {/* 0-FREE-AD RESTRICTION OVERLAY FOR NON-PRO USERS */}
-      {!isProUser && (
-        <div className="absolute inset-0 z-30 bg-slate-950/85 backdrop-blur-md rounded-3xl flex flex-col items-center justify-center p-6 text-center animate-in fade-in duration-200">
-          <div className="max-w-md w-full bg-slate-900 border-2 border-amber-500/60 rounded-3xl p-6 sm:p-8 shadow-2xl text-white relative overflow-hidden space-y-5">
-            <div className="w-16 h-16 rounded-2xl bg-gradient-to-tr from-amber-500 to-orange-600 text-slate-950 flex items-center justify-center mx-auto shadow-lg shadow-amber-500/30">
+      {/* POSTING RESTRICTED! PRO MEMBERSHIP REQUIRED - MODAL SCREEN */}
+      {shouldBlockPosting && (
+        <div className="absolute inset-0 z-40 bg-slate-950/90 backdrop-blur-md rounded-3xl flex flex-col items-center justify-center p-4 sm:p-6 text-center animate-in fade-in duration-200">
+          <div className="max-w-md w-full bg-slate-900 border-2 border-amber-500/70 rounded-3xl p-6 sm:p-8 shadow-2xl text-white relative overflow-hidden space-y-5">
+            <div className="w-16 h-16 rounded-2xl bg-gradient-to-tr from-amber-500 to-orange-600 text-slate-950 flex items-center justify-center mx-auto shadow-xl shadow-amber-500/30">
               <Lock className="w-8 h-8 text-slate-950" />
             </div>
 
             <div className="space-y-2">
-              <div className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-amber-500/20 border border-amber-500/40 text-amber-300 text-[11px] font-black uppercase tracking-wider">
+              <div className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-amber-500/20 border border-amber-500/50 text-amber-300 text-[11px] font-black uppercase tracking-wider">
                 <Sparkles className="w-3.5 h-3.5 fill-amber-400" /> PRO Membership Required
               </div>
               <h3 className="text-xl sm:text-2xl font-black text-white tracking-tight">
-                Posting Restricted!
+                Posting Restricted! PRO Membership Required
               </h3>
               <p className="text-xs sm:text-sm text-slate-300 leading-relaxed font-medium">
-                Posting Restricted! Free users can only act as Buyers to browse and purchase items. Please upgrade to a PRO Plan to post listings.
+                Your monthly plan status is currently <span className="text-red-400 font-bold uppercase">{livePlanStatus}</span>. Direct database verification requires an active monthly plan (<code className="bg-slate-800 px-1 py-0.5 rounded text-amber-300">plan_status = 'active'</code>) to publish listings.
               </p>
             </div>
 
-            <div className="bg-slate-950/70 border border-slate-800 rounded-2xl p-3.5 text-left text-xs space-y-2 text-slate-300">
-              <div className="flex items-center gap-2 text-amber-400 font-bold">
-                <CheckCircle2 className="w-4 h-4 text-amber-400 shrink-0" />
-                <span>Post unlimited ads with verified seller badge</span>
+            {/* UNLIMITED CATEGORIES UNLOCKED WHEN ACTIVE */}
+            <div className="bg-slate-950/80 border border-slate-800 rounded-2xl p-4 text-left text-xs space-y-2.5 text-slate-300">
+              <div className="text-[11px] font-bold text-slate-400 uppercase tracking-wider mb-1">
+                Active Monthly Plan Unlocks Unlimited Posts For:
               </div>
-              <div className="flex items-center gap-2 text-emerald-400 font-bold">
-                <CheckCircle2 className="w-4 h-4 text-emerald-400 shrink-0" />
-                <span>Direct WhatsApp inquiries & top marketplace ranking</span>
+              <div className="grid grid-cols-2 gap-2 text-[11px]">
+                <div className="flex items-center gap-1.5 text-amber-300 font-bold">
+                  <CheckCircle2 className="w-3.5 h-3.5 text-amber-400 shrink-0" />
+                  <span>Sellers & Products</span>
+                </div>
+                <div className="flex items-center gap-1.5 text-amber-300 font-bold">
+                  <CheckCircle2 className="w-3.5 h-3.5 text-amber-400 shrink-0" />
+                  <span>Shops & Outlets</span>
+                </div>
+                <div className="flex items-center gap-1.5 text-amber-300 font-bold">
+                  <CheckCircle2 className="w-3.5 h-3.5 text-amber-400 shrink-0" />
+                  <span>Cab & Taxi Services</span>
+                </div>
+                <div className="flex items-center gap-1.5 text-amber-300 font-bold">
+                  <CheckCircle2 className="w-3.5 h-3.5 text-amber-400 shrink-0" />
+                  <span>Travelers & Tours</span>
+                </div>
+                <div className="flex items-center gap-1.5 text-amber-300 font-bold col-span-2">
+                  <CheckCircle2 className="w-3.5 h-3.5 text-amber-400 shrink-0" />
+                  <span>Local Service & Job Providers</span>
+                </div>
               </div>
             </div>
 
-            <div className="pt-2 flex flex-col sm:flex-row items-center justify-center gap-3">
+            {/* ACTION BUTTONS */}
+            <div className="pt-2 flex flex-col gap-2.5">
               {onNavigateToPro && (
                 <button
                   type="button"
                   onClick={onNavigateToPro}
-                  className="w-full sm:w-auto px-6 py-3 bg-gradient-to-r from-amber-400 to-amber-500 hover:from-amber-300 hover:to-amber-400 text-slate-950 font-black text-xs sm:text-sm rounded-xl shadow-lg shadow-amber-500/20 transition flex items-center justify-center gap-2 cursor-pointer"
+                  className="w-full px-6 py-3.5 bg-gradient-to-r from-amber-400 via-amber-500 to-orange-500 hover:from-amber-300 hover:to-orange-400 text-slate-950 font-black text-xs sm:text-sm rounded-xl shadow-lg shadow-amber-500/20 transition flex items-center justify-center gap-2 cursor-pointer active:scale-98"
                 >
                   <Sparkles className="w-4 h-4 fill-slate-950" />
-                  View PRO Plans
+                  Upgrade to Monthly Plan
                 </button>
               )}
+
+              <button
+                type="button"
+                onClick={() => verifyPlanDirectFromSupabase(true)}
+                disabled={isCheckingDb}
+                className="w-full px-4 py-2.5 bg-slate-800 hover:bg-slate-700 disabled:opacity-60 text-amber-400 font-bold text-xs rounded-xl border border-amber-500/30 transition flex items-center justify-center gap-2 cursor-pointer"
+              >
+                <RefreshCw className={`w-3.5 h-3.5 ${isCheckingDb ? 'animate-spin' : ''}`} />
+                {isCheckingDb ? 'Checking Database...' : 'Re-verify Live Status in Database'}
+              </button>
+
               <button
                 type="button"
                 onClick={onCancel}
-                className="w-full sm:w-auto px-5 py-3 bg-slate-800 hover:bg-slate-700 text-slate-300 font-bold text-xs sm:text-sm rounded-xl transition cursor-pointer"
+                className="w-full px-5 py-2.5 bg-transparent hover:bg-slate-800/60 text-slate-400 hover:text-white font-bold text-xs rounded-xl transition cursor-pointer"
               >
                 Back to Marketplace
               </button>
             </div>
           </div>
+        </div>
+      )}
+
+      {/* ACTIVE PLAN BADGE BANNER */}
+      {isLiveActive && (
+        <div className="bg-emerald-600 text-white px-6 py-2.5 flex items-center justify-between text-xs font-bold">
+          <div className="flex items-center gap-2">
+            <CheckCircle2 className="w-4 h-4 text-emerald-200" />
+            <span>Monthly Plan Active — Unlimited Listing Posts Unlocked</span>
+          </div>
+          {livePlanExpiry && (
+            <span className="text-[10px] bg-emerald-700 px-2 py-0.5 rounded text-emerald-100 font-medium">
+              Valid until: {new Date(livePlanExpiry).toLocaleDateString()}
+            </span>
+          )}
         </div>
       )}
 

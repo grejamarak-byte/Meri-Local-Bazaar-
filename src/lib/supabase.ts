@@ -123,3 +123,112 @@ export function initSupabase(): SupabaseInitState {
 // Export singleton instance safely
 export const supabaseState = initSupabase();
 export const supabase = supabaseState.client;
+
+/**
+ * Direct Supabase update query on 'profiles' table to activate user monthly plan.
+ * Bypasses local state delays and session caching.
+ */
+export async function updateUserPlanActiveDirect(params: {
+  userId?: string;
+  email?: string;
+  phone?: string;
+  planTitle?: string;
+  planStatus?: 'active' | 'inactive';
+  isPro?: boolean;
+  durationDays?: number;
+  daysValid?: number;
+  additionalProfileFields?: Record<string, any>;
+}): Promise<{ success: boolean; error?: string }> {
+  if (!supabase) return { success: false, error: 'Supabase client not initialized' };
+
+  const days = params.daysValid || params.durationDays || 30;
+  const expiryDate = new Date(Date.now() + days * 86400000).toISOString();
+  const isProActive = params.isPro !== undefined ? params.isPro : true;
+  const statusStr = params.planStatus || (isProActive ? 'active' : 'inactive');
+
+  const updates: Record<string, any> = {
+    plan_status: statusStr,
+    pro_status: statusStr,
+    is_pro: isProActive,
+    ...(isProActive ? { is_approved_by_admin: true } : {}),
+    plan_title: params.planTitle || (isProActive ? 'Monthly PRO Plan' : 'Free Plan'),
+    plan_expiry_date: isProActive ? expiryDate : null,
+    pro_expiry: isProActive ? expiryDate : null,
+    updated_at: new Date().toISOString(),
+    ...(params.additionalProfileFields || {}),
+  };
+
+  try {
+    let query;
+    if (params.userId) {
+      query = supabase.from('profiles').update(updates).eq('id', params.userId);
+    } else if (params.email) {
+      query = supabase.from('profiles').update(updates).eq('email', params.email);
+    } else if (params.phone) {
+      query = supabase.from('profiles').update(updates).eq('phone', params.phone);
+    } else {
+      return { success: false, error: 'No user identifier (userId, email, or phone) provided' };
+    }
+
+    const { error } = await query;
+    if (error) {
+      console.error('Direct Supabase plan activation error:', error);
+      return { success: false, error: error.message };
+    }
+    return { success: true };
+  } catch (err: any) {
+    console.error('Direct plan activation exception:', err);
+    return { success: false, error: err?.message || 'Unknown error' };
+  }
+}
+
+/**
+ * Direct Supabase check against 'profiles' table to get fresh live plan status.
+ * Bypasses session caching and local state delays.
+ */
+export async function checkUserPlanStatusDirect(params: {
+  userId?: string;
+  email?: string;
+  phone?: string;
+}): Promise<{
+  isActive: boolean;
+  planStatus: 'active' | 'inactive';
+  isPro: boolean;
+  profile?: any;
+}> {
+  if (!supabase) {
+    return { isActive: false, planStatus: 'inactive', isPro: false, profile: null };
+  }
+
+  try {
+    let query = supabase.from('profiles').select('*');
+    if (params.userId) {
+      query = query.eq('id', params.userId);
+    } else if (params.email) {
+      query = query.eq('email', params.email);
+    } else if (params.phone) {
+      query = query.eq('phone', params.phone);
+    } else {
+      return { isActive: false, planStatus: 'inactive', isPro: false, profile: null };
+    }
+
+    const { data, error } = await query.maybeSingle();
+    if (error || !data) {
+      return { isActive: false, planStatus: 'inactive', isPro: false, profile: null };
+    }
+
+    const isExpired = data.plan_expiry_date && new Date(data.plan_expiry_date).getTime() < Date.now();
+    const isActive = !isExpired && (data.plan_status === 'active' || data.pro_status === 'active' || data.is_pro === true);
+
+    return {
+      isActive: !!isActive,
+      planStatus: isActive ? 'active' : 'inactive',
+      isPro: !!isActive,
+      profile: data,
+    };
+  } catch (e) {
+    console.error('Direct Supabase checkUserPlanStatusDirect error:', e);
+    return { isActive: false, planStatus: 'inactive', isPro: false, profile: null };
+  }
+}
+

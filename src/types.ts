@@ -45,6 +45,8 @@ export interface UserProfile extends LocalAddressFields {
   permanent_address?: string;
   role: 'customer' | 'seller' | 'delivery_partner' | 'admin' | 'super_admin' | 'user' | string;
   account_status?: 'active' | 'inactive';
+  plan_status?: 'active' | 'inactive' | string;
+  plan_title?: string;
   plan_expiry_date?: string | null;
   is_pro: boolean;
   pro_status?: 'active' | 'inactive' | string;
@@ -411,10 +413,12 @@ export function calculateDeliveryFare(
 
 export interface RechargeRequest {
   id: string;
+  user_id?: string;
   user_name: string;
   user_email: string;
   user_phone: string;
   plan_name: string;
+  plan_title?: string;
   amount: number;
   utr: string;
   screenshot_url?: string;
@@ -468,6 +472,7 @@ export interface ShopRegistration extends LocalAddressFields {
   user_id: string;
   user_name: string;
   user_phone: string;
+  phone?: string;
   user_email?: string;
   shop_name: string;
   category: string;
@@ -498,6 +503,8 @@ export interface VehicleRegistration extends LocalAddressFields {
   user_id: string;
   driver_name: string;
   driver_phone: string;
+  owner_phone?: string;
+  phone?: string;
   driver_whatsapp?: string;
   driver_email?: string;
   vehicle_type: 'Local Cab / Taxi' | 'Traveler (12-26 Seater)' | 'Auto Rickshaw' | 'Commercial Bike' | 'Pickup / Commercial Van' | string;

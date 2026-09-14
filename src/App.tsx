@@ -26,7 +26,7 @@ import {
   Check,
   Search,
 } from 'lucide-react';
-import { supabase } from './lib/supabase';
+import { supabase, updateUserPlanActiveDirect } from './lib/supabase';
 import { generateUuid, ensureUuid } from './lib/uuid';
 import { BrandLogo, BrandIcon } from './components/BrandLogo';
 import {
@@ -1293,6 +1293,19 @@ export function App() {
   // Admin Approve Recharge
   const handleApproveRecharge = async (req: RechargeRequest) => {
     const approvedTimestamp = new Date().toISOString();
+    const expiryDate = new Date(Date.now() + 30 * 86400000).toISOString().split('T')[0];
+
+    // 1. Direct Supabase update query on 'profiles' table to change user's plan status to 'active' & is_pro = true
+    await updateUserPlanActiveDirect({
+      userId: req.user_id,
+      email: req.user_email,
+      phone: req.user_phone,
+      isPro: true,
+      planStatus: 'active',
+      planTitle: req.plan_title || 'Monthly PRO Membership',
+      daysValid: 30,
+    });
+
     setRechargeRequests((prev) =>
       prev.map((r) =>
         r.id === req.id
@@ -1303,16 +1316,40 @@ export function App() {
 
     setProfiles((prev) =>
       prev.map((p) =>
-        p.email === req.user_email || p.phone === req.user_phone
+        (req.user_id && p.id === req.user_id) ||
+        (req.user_email && p.email === req.user_email) ||
+        (req.user_phone && p.phone === req.user_phone)
           ? {
               ...p,
               is_pro: true,
               pro_status: 'active',
-              pro_expiry: new Date(Date.now() + 30 * 86400000).toISOString().split('T')[0],
+              plan_status: 'active',
+              plan_title: req.plan_title || 'Monthly PRO Membership',
+              pro_expiry: expiryDate,
             }
           : p
       )
     );
+
+    if (
+      currentUser &&
+      ((req.user_id && currentUser.id === req.user_id) ||
+        (req.user_email && currentUser.email === req.user_email) ||
+        (req.user_phone && currentUser.phone === req.user_phone))
+    ) {
+      const updatedUser = {
+        ...currentUser,
+        is_pro: true,
+        pro_status: 'active',
+        plan_status: 'active',
+        plan_title: req.plan_title || 'Monthly PRO Membership',
+        pro_expiry: expiryDate,
+      };
+      setCurrentUser(updatedUser);
+      try {
+        localStorage.setItem('mlb_active_user', JSON.stringify(updatedUser));
+      } catch (_) {}
+    }
 
     if (supabase) {
       try {
@@ -1320,15 +1357,6 @@ export function App() {
           .from('recharge_requests')
           .update({ status: 'approved', approved_at: approvedTimestamp })
           .eq('id', req.id);
-
-        await supabase
-          .from('profiles')
-          .update({
-            is_pro: true,
-            pro_status: 'active',
-            pro_expiry: new Date(Date.now() + 30 * 86400000).toISOString().split('T')[0],
-          })
-          .or(`email.eq.${req.user_email},phone.eq.${req.user_phone}`);
       } catch (e) {
         console.error('Failed to approve recharge in database:', e);
       }
@@ -1353,33 +1381,48 @@ export function App() {
   // Admin Toggle User PRO
   const handleToggleUserPro = async (user: UserProfile) => {
     const newProState = !user.is_pro;
+    const newPlanStatus = newProState ? 'active' : 'inactive';
+    const expiryDate = newProState
+      ? new Date(Date.now() + 365 * 86400000).toISOString().split('T')[0]
+      : undefined;
+
+    // Direct Supabase update query on 'profiles' table
+    await updateUserPlanActiveDirect({
+      userId: user.id,
+      email: user.email,
+      phone: user.phone,
+      isPro: newProState,
+      planStatus: newPlanStatus,
+      planTitle: newProState ? 'Admin Granted PRO' : 'Free Buyer',
+      daysValid: newProState ? 365 : 0,
+    });
+
     setProfiles((prev) =>
       prev.map((p) =>
         p.id === user.id
           ? {
               ...p,
               is_pro: newProState,
-              pro_status: newProState ? 'active' : 'inactive',
-              pro_expiry: newProState
-                ? new Date(Date.now() + 365 * 86400000).toISOString().split('T')[0]
-                : undefined,
+              pro_status: newPlanStatus,
+              plan_status: newPlanStatus,
+              pro_expiry: expiryDate,
             }
           : p
       )
     );
 
-    if (supabase) {
+    if (currentUser && currentUser.id === user.id) {
+      const updatedUser = {
+        ...currentUser,
+        is_pro: newProState,
+        pro_status: newPlanStatus,
+        plan_status: newPlanStatus,
+        pro_expiry: expiryDate,
+      };
+      setCurrentUser(updatedUser);
       try {
-        await supabase
-          .from('profiles')
-          .update({
-            is_pro: newProState,
-            pro_status: newProState ? 'active' : 'inactive',
-          })
-          .eq('id', user.id);
-      } catch (e) {
-        console.error('Failed to toggle PRO in database:', e);
-      }
+        localStorage.setItem('mlb_active_user', JSON.stringify(updatedUser));
+      } catch (_) {}
     }
   };
 
@@ -1440,16 +1483,37 @@ export function App() {
 
   // Admin Toggle is_approved_by_admin for Profiles
   const handleToggleProfileApproval = async (profile: UserProfile, approved: boolean) => {
+    if (approved) {
+      // Direct Supabase update query on 'profiles' table
+      await updateUserPlanActiveDirect({
+        userId: profile.id,
+        email: profile.email,
+        phone: profile.phone,
+        isPro: true,
+        planStatus: 'active',
+        planTitle: 'Admin Approved PRO',
+        daysValid: 30,
+      });
+    }
+
     setProfiles((prev) =>
       prev.map((p) =>
         p.id === profile.id || (profile.email && p.email === profile.email)
-          ? { ...p, is_approved_by_admin: approved }
+          ? {
+              ...p,
+              is_approved_by_admin: approved,
+              ...(approved ? { is_pro: true, pro_status: 'active', plan_status: 'active' } : {}),
+            }
           : p
       )
     );
 
     if (currentUser && (currentUser.id === profile.id || (profile.email && currentUser.email === profile.email))) {
-      const updated = { ...currentUser, is_approved_by_admin: approved };
+      const updated = {
+        ...currentUser,
+        is_approved_by_admin: approved,
+        ...(approved ? { is_pro: true, pro_status: 'active', plan_status: 'active' } : {}),
+      };
       setCurrentUser(updated);
       try {
         localStorage.setItem('mlb_active_user', JSON.stringify(updated));
@@ -1460,7 +1524,10 @@ export function App() {
       try {
         await supabase
           .from('profiles')
-          .update({ is_approved_by_admin: approved })
+          .update({
+            is_approved_by_admin: approved,
+            ...(approved ? { is_pro: true, pro_status: 'active', plan_status: 'active' } : {}),
+          })
           .eq('id', profile.id);
       } catch (e) {
         console.warn('Supabase toggle profile approval sync:', e);
@@ -1788,6 +1855,46 @@ export function App() {
 
   const handleApproveShopRegistration = async (id: string) => {
     const verifiedTimestamp = new Date().toISOString();
+    const targetShop = shopRegistrations.find((s) => s.id === id);
+
+    if (targetShop) {
+      // Direct Supabase update query on 'profiles' table to change that specific user's plan status to 'active' & is_pro = true
+      await updateUserPlanActiveDirect({
+        userId: targetShop.user_id,
+        phone: targetShop.phone,
+        isPro: true,
+        planStatus: 'active',
+        planTitle: 'Shop Partner Monthly Plan',
+        daysValid: 30,
+      });
+
+      setProfiles((prev) =>
+        prev.map((p) =>
+          (targetShop.user_id && p.id === targetShop.user_id) || (targetShop.phone && p.phone === targetShop.phone)
+            ? { ...p, is_pro: true, pro_status: 'active', plan_status: 'active', is_approved_by_admin: true }
+            : p
+        )
+      );
+
+      if (
+        currentUser &&
+        ((targetShop.user_id && currentUser.id === targetShop.user_id) ||
+          (targetShop.phone && currentUser.phone === targetShop.phone))
+      ) {
+        const updated = {
+          ...currentUser,
+          is_pro: true,
+          pro_status: 'active',
+          plan_status: 'active',
+          is_approved_by_admin: true,
+        };
+        setCurrentUser(updated);
+        try {
+          localStorage.setItem('mlb_active_user', JSON.stringify(updated));
+        } catch (_) {}
+      }
+    }
+
     setShopRegistrations((prev) =>
       prev.map((s) => (s.id === id ? { ...s, status: 'approved', verified_at: verifiedTimestamp } : s))
     );
@@ -1821,6 +1928,46 @@ export function App() {
 
   const handleApproveVehicleRegistration = async (id: string) => {
     const verifiedTimestamp = new Date().toISOString();
+    const targetVeh = vehicleRegistrations.find((v) => v.id === id);
+
+    if (targetVeh) {
+      // Direct Supabase update query on 'profiles' table to change that specific driver user's plan status to 'active' & is_pro = true
+      await updateUserPlanActiveDirect({
+        userId: targetVeh.user_id,
+        phone: targetVeh.owner_phone,
+        isPro: true,
+        planStatus: 'active',
+        planTitle: 'Cab & Taxi Driver Monthly Plan',
+        daysValid: 30,
+      });
+
+      setProfiles((prev) =>
+        prev.map((p) =>
+          (targetVeh.user_id && p.id === targetVeh.user_id) || (targetVeh.owner_phone && p.phone === targetVeh.owner_phone)
+            ? { ...p, is_pro: true, pro_status: 'active', plan_status: 'active', is_approved_by_admin: true }
+            : p
+        )
+      );
+
+      if (
+        currentUser &&
+        ((targetVeh.user_id && currentUser.id === targetVeh.user_id) ||
+          (targetVeh.owner_phone && currentUser.phone === targetVeh.owner_phone))
+      ) {
+        const updated = {
+          ...currentUser,
+          is_pro: true,
+          pro_status: 'active',
+          plan_status: 'active',
+          is_approved_by_admin: true,
+        };
+        setCurrentUser(updated);
+        try {
+          localStorage.setItem('mlb_active_user', JSON.stringify(updated));
+        } catch (_) {}
+      }
+    }
+
     setVehicleRegistrations((prev) =>
       prev.map((v) => (v.id === id ? { ...v, status: 'approved', verified_at: verifiedTimestamp } : v))
     );
@@ -1911,6 +2058,46 @@ export function App() {
 
   const handleApproveServiceRegistration = async (id: string) => {
     const verifiedTimestamp = new Date().toISOString();
+    const targetService = serviceRegistrations.find((s) => s.id === id);
+
+    if (targetService) {
+      // Direct Supabase update query on 'profiles' table to change that specific user's plan status to 'active' & is_pro = true
+      await updateUserPlanActiveDirect({
+        userId: targetService.user_id,
+        phone: targetService.phone,
+        isPro: true,
+        planStatus: 'active',
+        planTitle: 'Local Service Partner Monthly Plan',
+        daysValid: 30,
+      });
+
+      setProfiles((prev) =>
+        prev.map((p) =>
+          (targetService.user_id && p.id === targetService.user_id) || (targetService.phone && p.phone === targetService.phone)
+            ? { ...p, is_pro: true, pro_status: 'active', plan_status: 'active', is_approved_by_admin: true }
+            : p
+        )
+      );
+
+      if (
+        currentUser &&
+        ((targetService.user_id && currentUser.id === targetService.user_id) ||
+          (targetService.phone && currentUser.phone === targetService.phone))
+      ) {
+        const updated = {
+          ...currentUser,
+          is_pro: true,
+          pro_status: 'active',
+          plan_status: 'active',
+          is_approved_by_admin: true,
+        };
+        setCurrentUser(updated);
+        try {
+          localStorage.setItem('mlb_active_user', JSON.stringify(updated));
+        } catch (_) {}
+      }
+    }
+
     setServiceRegistrations((prev) =>
       prev.map((s) =>
         s.id === id
@@ -3605,7 +3792,8 @@ export function App() {
             userPhone={currentUser.phone}
             userName={currentUser.full_name}
             userId={currentUser.id}
-            isProUser={currentUser.is_pro}
+            userEmail={currentUser.email}
+            isProUser={currentUser.is_pro || currentUser.plan_status === 'active'}
           />
         )}
 

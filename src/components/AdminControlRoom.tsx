@@ -61,7 +61,7 @@ import {
   getListingPrimaryImage,
   getListingImages,
 } from '../types';
-import { supabase } from '../lib/supabase';
+import { supabase, updateUserPlanActiveDirect } from '../lib/supabase';
 import { formatWhatsAppUrl } from './ListingDetailModal';
 import { AdminBannerAdsManager } from './AdminBannerAdsManager';
 
@@ -292,6 +292,107 @@ export const AdminControlRoom: React.FC<AdminControlRoomProps> = ({
     } finally {
       setProcessingPayoutKey(null);
     }
+  };
+
+  // DIRECT SUPABASE PLAN ACTIVATION WRAPPERS:
+  // When clicked, these execute a direct Supabase update query on the 'profiles' table
+  // to immediately change that specific user's plan status to 'active' (and is_pro = true).
+  const handleApproveShopDirect = async (shop: ShopRegistration) => {
+    try {
+      await updateUserPlanActiveDirect({
+        userId: shop.user_id,
+        phone: shop.phone,
+        isPro: true,
+        planStatus: 'active',
+        planTitle: 'Shop Partner Monthly Plan',
+        daysValid: 30,
+      });
+    } catch (e) {
+      console.warn('Direct Supabase plan activation notice:', e);
+    }
+    if (onApproveShopRegistration) {
+      onApproveShopRegistration(shop.id);
+    }
+  };
+
+  const handleApproveVehicleDirect = async (veh: VehicleRegistration) => {
+    try {
+      await updateUserPlanActiveDirect({
+        userId: veh.user_id,
+        phone: veh.owner_phone,
+        isPro: true,
+        planStatus: 'active',
+        planTitle: 'Cab & Taxi Driver Monthly Plan',
+        daysValid: 30,
+      });
+    } catch (e) {
+      console.warn('Direct Supabase plan activation notice:', e);
+    }
+    if (onApproveVehicleRegistration) {
+      onApproveVehicleRegistration(veh.id);
+    }
+  };
+
+  const handleApproveFleetDirect = async (fleet: any) => {
+    try {
+      await updateUserPlanActiveDirect({
+        userId: fleet.user_id,
+        phone: fleet.phone,
+        isPro: true,
+        planStatus: 'active',
+        planTitle: 'Fleet Rider & Driver Monthly Plan',
+        daysValid: 30,
+      });
+    } catch (e) {
+      console.warn('Direct Supabase plan activation notice:', e);
+    }
+    if (onUpdateDeliveryPartner) {
+      onUpdateDeliveryPartner(
+        fleet.user_id,
+        true,
+        'active',
+        fleet.vehicle_type,
+        fleet.vehicle_number
+      );
+    }
+    if (fleet.source === 'service_reg' && onApproveServiceRegistration) {
+      onApproveServiceRegistration(fleet.id);
+    }
+  };
+
+  const handleApproveServiceDirect = async (srv: ServiceRegistration) => {
+    try {
+      await updateUserPlanActiveDirect({
+        userId: srv.user_id,
+        phone: srv.phone,
+        isPro: true,
+        planStatus: 'active',
+        planTitle: 'Local Service & Job Monthly Plan',
+        daysValid: 30,
+      });
+    } catch (e) {
+      console.warn('Direct Supabase plan activation notice:', e);
+    }
+    if (onApproveServiceRegistration) {
+      onApproveServiceRegistration(srv.id);
+    }
+  };
+
+  const handleApproveRechargeDirect = async (req: RechargeRequest) => {
+    try {
+      await updateUserPlanActiveDirect({
+        userId: req.user_id,
+        email: req.user_email,
+        phone: req.user_phone,
+        isPro: true,
+        planStatus: 'active',
+        planTitle: req.plan_title || 'Monthly PRO Membership',
+        daysValid: 30,
+      });
+    } catch (e) {
+      console.warn('Direct Supabase plan activation notice:', e);
+    }
+    onApproveRecharge(req);
   };
 
   // Local settings editor state
@@ -1692,14 +1793,14 @@ export const AdminControlRoom: React.FC<AdminControlRoomProps> = ({
                         {shop.status === 'pending' ? (
                           <div className="flex items-center gap-1.5">
                             <button
-                              onClick={() => onApproveShopRegistration?.(shop.id)}
-                              className="px-3 py-1.5 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl text-xs font-black transition flex items-center gap-1 shadow-xs"
+                              onClick={() => handleApproveShopDirect(shop)}
+                              className="px-3 py-1.5 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl text-xs font-black transition flex items-center gap-1 shadow-xs cursor-pointer"
                             >
-                              <CheckCircle2 className="w-3.5 h-3.5" /> Approve
+                              <CheckCircle2 className="w-3.5 h-3.5" /> Approve & Activate Plan
                             </button>
                             <button
                               onClick={() => onRejectShopRegistration?.(shop.id)}
-                              className="px-3 py-1.5 bg-red-600 hover:bg-red-700 text-white rounded-xl text-xs font-black transition flex items-center gap-1 shadow-xs"
+                              className="px-3 py-1.5 bg-red-600 hover:bg-red-700 text-white rounded-xl text-xs font-black transition flex items-center gap-1 shadow-xs cursor-pointer"
                             >
                               <XCircle className="w-3.5 h-3.5" /> Reject
                             </button>
@@ -1707,14 +1808,14 @@ export const AdminControlRoom: React.FC<AdminControlRoomProps> = ({
                         ) : (
                           <div className="flex items-center gap-1">
                             <button
-                              onClick={() => onApproveShopRegistration?.(shop.id)}
-                              className={`px-2.5 py-1 rounded-lg text-xs font-bold transition ${
+                              onClick={() => handleApproveShopDirect(shop)}
+                              className={`px-2.5 py-1 rounded-lg text-xs font-bold transition cursor-pointer ${
                                 shop.status === 'approved'
                                   ? 'bg-emerald-100 text-emerald-800 border border-emerald-300'
                                   : 'bg-slate-100 hover:bg-emerald-50 text-slate-600'
                               }`}
                             >
-                              ✓ Approved
+                              {shop.status === 'approved' ? '✓ Plan Active' : 'Activate Plan'}
                             </button>
                             <button
                               onClick={() => onRejectShopRegistration?.(shop.id)}
@@ -1887,14 +1988,14 @@ export const AdminControlRoom: React.FC<AdminControlRoomProps> = ({
                         {veh.status === 'pending' ? (
                           <div className="flex items-center gap-1.5">
                             <button
-                              onClick={() => onApproveVehicleRegistration?.(veh.id)}
-                              className="px-3 py-1.5 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl text-xs font-black transition flex items-center gap-1 shadow-xs"
+                              onClick={() => handleApproveVehicleDirect(veh)}
+                              className="px-3 py-1.5 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl text-xs font-black transition flex items-center gap-1 shadow-xs cursor-pointer"
                             >
-                              <CheckCircle2 className="w-3.5 h-3.5" /> Approve
+                              <CheckCircle2 className="w-3.5 h-3.5" /> Approve & Activate Plan
                             </button>
                             <button
                               onClick={() => onRejectVehicleRegistration?.(veh.id)}
-                              className="px-3 py-1.5 bg-red-600 hover:bg-red-700 text-white rounded-xl text-xs font-black transition flex items-center gap-1 shadow-xs"
+                              className="px-3 py-1.5 bg-red-600 hover:bg-red-700 text-white rounded-xl text-xs font-black transition flex items-center gap-1 shadow-xs cursor-pointer"
                             >
                               <XCircle className="w-3.5 h-3.5" /> Reject
                             </button>
@@ -1902,14 +2003,14 @@ export const AdminControlRoom: React.FC<AdminControlRoomProps> = ({
                         ) : (
                           <div className="flex items-center gap-1">
                             <button
-                              onClick={() => onApproveVehicleRegistration?.(veh.id)}
-                              className={`px-2.5 py-1 rounded-lg text-xs font-bold transition ${
+                              onClick={() => handleApproveVehicleDirect(veh)}
+                              className={`px-2.5 py-1 rounded-lg text-xs font-bold transition cursor-pointer ${
                                 veh.status === 'approved'
                                   ? 'bg-emerald-100 text-emerald-800 border border-emerald-300'
                                   : 'bg-slate-100 hover:bg-emerald-50 text-slate-600'
                               }`}
                             >
-                              ✓ Approved
+                              {veh.status === 'approved' ? '✓ Plan Active' : 'Activate Plan'}
                             </button>
                             <button
                               onClick={() => onRejectVehicleRegistration?.(veh.id)}
@@ -2080,23 +2181,10 @@ export const AdminControlRoom: React.FC<AdminControlRoomProps> = ({
                         {fleet.status === 'pending' || !fleet.is_approved ? (
                           <div className="flex items-center gap-1.5">
                             <button
-                              onClick={() => {
-                                if (onUpdateDeliveryPartner) {
-                                  onUpdateDeliveryPartner(
-                                    fleet.user_id,
-                                    true,
-                                    'active',
-                                    fleet.vehicle_type,
-                                    fleet.vehicle_number
-                                  );
-                                }
-                                if (fleet.source === 'service_reg' && onApproveServiceRegistration) {
-                                  onApproveServiceRegistration(fleet.id);
-                                }
-                              }}
-                              className="px-3 py-1.5 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl text-xs font-black transition flex items-center gap-1 shadow-xs"
+                              onClick={() => handleApproveFleetDirect(fleet)}
+                              className="px-3 py-1.5 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl text-xs font-black transition flex items-center gap-1 shadow-xs cursor-pointer"
                             >
-                              <CheckCircle2 className="w-3.5 h-3.5" /> Approve Rider
+                              <CheckCircle2 className="w-3.5 h-3.5" /> Approve & Activate Plan
                             </button>
                             <button
                               onClick={() => {
@@ -2113,7 +2201,7 @@ export const AdminControlRoom: React.FC<AdminControlRoomProps> = ({
                                   onRejectServiceRegistration(fleet.id, 'Admin verification declined');
                                 }
                               }}
-                              className="px-3 py-1.5 bg-red-600 hover:bg-red-700 text-white rounded-xl text-xs font-black transition flex items-center gap-1 shadow-xs"
+                              className="px-3 py-1.5 bg-red-600 hover:bg-red-700 text-white rounded-xl text-xs font-black transition flex items-center gap-1 shadow-xs cursor-pointer"
                             >
                               <XCircle className="w-3.5 h-3.5" /> Reject
                             </button>
@@ -2121,14 +2209,10 @@ export const AdminControlRoom: React.FC<AdminControlRoomProps> = ({
                         ) : (
                           <div className="flex items-center gap-1">
                             <button
-                              onClick={() => {
-                                if (onUpdateDeliveryPartner) {
-                                  onUpdateDeliveryPartner(fleet.user_id, true, 'active');
-                                }
-                              }}
-                              className="px-2.5 py-1 bg-emerald-100 text-emerald-800 border border-emerald-300 rounded-lg text-xs font-bold"
+                              onClick={() => handleApproveFleetDirect(fleet)}
+                              className="px-2.5 py-1 bg-emerald-100 text-emerald-800 border border-emerald-300 rounded-lg text-xs font-bold cursor-pointer"
                             >
-                              ✓ Approved Rider
+                              ✓ Rider Plan Active
                             </button>
                           </div>
                         )}
@@ -2325,10 +2409,10 @@ export const AdminControlRoom: React.FC<AdminControlRoomProps> = ({
                         {!isApproved ? (
                           <div className="flex items-center gap-1.5">
                             <button
-                              onClick={() => onApproveServiceRegistration?.(srv.id)}
-                              className="px-3 py-1.5 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl text-xs font-black transition flex items-center gap-1 shadow-xs"
+                              onClick={() => handleApproveServiceDirect(srv)}
+                              className="px-3 py-1.5 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl text-xs font-black transition flex items-center gap-1 shadow-xs cursor-pointer"
                             >
-                              <CheckCircle2 className="w-3.5 h-3.5" /> Approve
+                              <CheckCircle2 className="w-3.5 h-3.5" /> Approve & Activate Plan
                             </button>
                             <button
                               onClick={() => {
@@ -2340,7 +2424,7 @@ export const AdminControlRoom: React.FC<AdminControlRoomProps> = ({
                                   onRejectServiceRegistration?.(srv.id, reason);
                                 }
                               }}
-                              className="px-3 py-1.5 bg-red-600 hover:bg-red-700 text-white rounded-xl text-xs font-black transition flex items-center gap-1 shadow-xs"
+                              className="px-3 py-1.5 bg-red-600 hover:bg-red-700 text-white rounded-xl text-xs font-black transition flex items-center gap-1 shadow-xs cursor-pointer"
                             >
                               <XCircle className="w-3.5 h-3.5" /> Reject
                             </button>
@@ -2348,10 +2432,10 @@ export const AdminControlRoom: React.FC<AdminControlRoomProps> = ({
                         ) : (
                           <div className="flex items-center gap-1">
                             <button
-                              onClick={() => onApproveServiceRegistration?.(srv.id)}
-                              className="px-2.5 py-1 bg-emerald-100 text-emerald-800 border border-emerald-300 rounded-lg text-xs font-bold"
+                              onClick={() => handleApproveServiceDirect(srv)}
+                              className="px-2.5 py-1 bg-emerald-100 text-emerald-800 border border-emerald-300 rounded-lg text-xs font-bold cursor-pointer"
                             >
-                              ✓ Approved
+                              ✓ Service Plan Active
                             </button>
                           </div>
                         )}
@@ -2432,14 +2516,14 @@ export const AdminControlRoom: React.FC<AdminControlRoomProps> = ({
                   {req.status === 'pending' ? (
                     <>
                       <button
-                        onClick={() => onApproveRecharge(req)}
-                        className="px-3.5 py-1.5 bg-emerald-600 hover:bg-emerald-700 active:scale-95 text-white rounded-xl text-xs font-black transition flex items-center gap-1 shadow-xs"
+                        onClick={() => handleApproveRechargeDirect(req)}
+                        className="px-3.5 py-1.5 bg-emerald-600 hover:bg-emerald-700 active:scale-95 text-white rounded-xl text-xs font-black transition flex items-center gap-1 shadow-xs cursor-pointer"
                       >
                         <CheckCircle2 className="w-3.5 h-3.5" /> Accept & Activate PRO
                       </button>
                       <button
                         onClick={() => onRejectRecharge(req.id)}
-                        className="px-3.5 py-1.5 bg-red-600 hover:bg-red-700 active:scale-95 text-white rounded-xl text-xs font-black transition flex items-center gap-1 shadow-xs"
+                        className="px-3.5 py-1.5 bg-red-600 hover:bg-red-700 active:scale-95 text-white rounded-xl text-xs font-black transition flex items-center gap-1 shadow-xs cursor-pointer"
                       >
                         <XCircle className="w-3.5 h-3.5" /> Reject Request
                       </button>
@@ -2447,8 +2531,8 @@ export const AdminControlRoom: React.FC<AdminControlRoomProps> = ({
                   ) : (
                     <div className="flex items-center gap-1.5">
                       <button
-                        onClick={() => onApproveRecharge(req)}
-                        className={`px-3 py-1 rounded-xl text-xs font-bold transition ${
+                        onClick={() => handleApproveRechargeDirect(req)}
+                        className={`px-3 py-1 rounded-xl text-xs font-bold transition cursor-pointer ${
                           req.status === 'approved'
                             ? 'bg-emerald-100 text-emerald-800 border border-emerald-300'
                             : 'bg-slate-100 hover:bg-emerald-50 text-slate-600 hover:text-emerald-700'
@@ -2670,7 +2754,24 @@ export const AdminControlRoom: React.FC<AdminControlRoomProps> = ({
                       <div className="flex items-center gap-1.5 flex-wrap">
                         {/* Toggle is_approved_by_admin Button */}
                         <button
-                          onClick={() => onToggleProfileApproval?.(p, !isApproved)}
+                          onClick={async () => {
+                            if (!isApproved) {
+                              try {
+                                await updateUserPlanActiveDirect({
+                                  userId: p.id,
+                                  email: p.email,
+                                  phone: p.phone,
+                                  isPro: true,
+                                  planStatus: 'active',
+                                  planTitle: 'Admin Approved PRO',
+                                  daysValid: 30,
+                                });
+                              } catch (e) {
+                                console.warn('Direct Supabase plan activation notice:', e);
+                              }
+                            }
+                            onToggleProfileApproval?.(p, !isApproved);
+                          }}
                           className={`px-3 py-1.5 rounded-xl text-xs font-black transition flex items-center gap-1 shadow-xs cursor-pointer ${
                             isApproved
                               ? 'bg-rose-50 hover:bg-rose-100 border border-rose-300 text-rose-700'
@@ -2686,20 +2787,36 @@ export const AdminControlRoom: React.FC<AdminControlRoomProps> = ({
                           ) : (
                             <>
                               <CheckCircle2 className="w-3.5 h-3.5" />
-                              Approve Account
+                              Approve & Activate Plan
                             </>
                           )}
                         </button>
 
                         <button
-                          onClick={() => onToggleUserPro(p)}
+                          onClick={async () => {
+                            const nextPro = !p.is_pro;
+                            try {
+                              await updateUserPlanActiveDirect({
+                                userId: p.id,
+                                email: p.email,
+                                phone: p.phone,
+                                isPro: nextPro,
+                                planStatus: nextPro ? 'active' : 'inactive',
+                                planTitle: nextPro ? 'Admin Granted PRO' : 'Free Buyer',
+                                daysValid: nextPro ? 365 : 0,
+                              });
+                            } catch (e) {
+                              console.warn('Direct Supabase plan activation notice:', e);
+                            }
+                            onToggleUserPro(p);
+                          }}
                           className={`px-3 py-1.5 rounded-xl text-xs font-bold transition cursor-pointer ${
                             p.is_pro
                               ? 'bg-amber-100 text-amber-900 border border-amber-300'
                               : 'bg-white hover:bg-slate-100 border border-slate-300 text-slate-700'
                           }`}
                         >
-                          {p.is_pro ? 'Remove PRO' : 'Grant PRO'}
+                          {p.is_pro ? 'Remove PRO' : 'Grant PRO & Active Plan'}
                         </button>
                       </div>
                     </div>
