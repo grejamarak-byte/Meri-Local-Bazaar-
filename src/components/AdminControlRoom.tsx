@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import {
   ShieldAlert,
   Clock,
@@ -197,6 +197,110 @@ export const AdminControlRoom: React.FC<AdminControlRoomProps> = ({
   const [adjustingBalanceKey, setAdjustingBalanceKey] = useState<string | null>(null);
   const [processingPayoutKey, setProcessingPayoutKey] = useState<string | null>(null);
   const [payoutSuccessMsg, setPayoutSuccessMsg] = useState<string | null>(null);
+
+  // Dedicated Pending Payout Requests List States
+  const [livePendingPayouts, setLivePendingPayouts] = useState<PayoutRequest[]>([]);
+  const [isFetchingPending, setIsFetchingPending] = useState(false);
+  const [pendingActionLoadingId, setPendingActionLoadingId] = useState<string | null>(null);
+
+  // Fetch all pending payout requests directly from Supabase
+  const fetchPendingPayouts = useCallback(async () => {
+    setIsFetchingPending(true);
+    try {
+      if (supabase) {
+        const { data, error } = await supabase
+          .from('payout_requests')
+          .select('*')
+          .eq('status', 'pending')
+          .order('created_at', { ascending: false });
+        if (!error && data) {
+          setLivePendingPayouts(data);
+          return;
+        }
+      }
+    } catch (e) {
+      console.warn('Notice fetching pending payout requests:', e);
+    } finally {
+      setIsFetchingPending(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    fetchPendingPayouts();
+  }, [fetchPendingPayouts]);
+
+  // Combined pending payouts list: prefer direct live database rows or fallback to props
+  const pendingRequestsToDisplay = livePendingPayouts.length > 0
+    ? livePendingPayouts
+    : (payoutRequests || []).filter((p) => p.status === 'pending');
+
+  const handleApprovePendingPayout = async (req: PayoutRequest) => {
+    setPendingActionLoadingId(req.id);
+    try {
+      if (onApprovePayout) {
+        await onApprovePayout(req.id);
+      }
+      if (supabase) {
+        const completedTimestamp = new Date().toISOString();
+        await supabase
+          .from('payout_requests')
+          .update({ status: 'completed', completed_at: completedTimestamp })
+          .eq('id', req.id);
+
+        if (req.user_id) {
+          const { data: walData } = await supabase
+            .from('wallets')
+            .select('balance')
+            .eq('user_id', req.user_id)
+            .maybeSingle();
+          if (walData) {
+            const currentBal = Number(walData.balance) || 0;
+            const newBal = Math.max(0, currentBal - Number(req.amount));
+            await supabase
+              .from('wallets')
+              .upsert(
+                { user_id: req.user_id, balance: newBal, updated_at: completedTimestamp },
+                { onConflict: 'user_id' }
+              );
+          }
+        }
+      }
+      setLivePendingPayouts((prev) => prev.filter((p) => p.id !== req.id));
+      setPayoutSuccessMsg(
+        `Payment of ₹${formatPrice(req.amount)} approved for ${req.user_name || 'Partner'}. Partner wallet balance updated.`
+      );
+      if (onRefresh) onRefresh();
+    } catch (err: any) {
+      console.error('Approve payout failed:', err);
+    } finally {
+      setPendingActionLoadingId(null);
+    }
+  };
+
+  const handleRejectPendingPayout = async (req: PayoutRequest) => {
+    const reason =
+      window.prompt('Enter reason for rejecting payout request (optional):', 'Details could not be verified') ||
+      'Details could not be verified';
+    setPendingActionLoadingId(req.id);
+    try {
+      if (onRejectPayout) {
+        await onRejectPayout(req.id, reason);
+      }
+      if (supabase) {
+        await supabase
+          .from('payout_requests')
+          .update({ status: 'rejected', admin_notes: reason })
+          .eq('id', req.id);
+      }
+      setLivePendingPayouts((prev) => prev.filter((p) => p.id !== req.id));
+      setPayoutSuccessMsg(`Payout request of ₹${formatPrice(req.amount)} rejected.`);
+      if (onRefresh) onRefresh();
+    } catch (err: any) {
+      console.error('Reject payout failed:', err);
+    } finally {
+      setPendingActionLoadingId(null);
+    }
+  };
 
   // Helper for wallet balance with robust multi-field lookup across wallets, profiles, and registrations
   const getUserWalletBalance = (userId?: string, userPhone?: string, userEmail?: string): number => {
@@ -3321,7 +3425,166 @@ export const AdminControlRoom: React.FC<AdminControlRoomProps> = ({
             </div>
           </div>
 
-          {/* Subtabs Selector */}
+          {/* ========================================================================= */}
+          {/* DEDICATED PENDING PAYOUT REQUESTS LIST (RIGHT BELOW BALANCE TILES) */}
+          {/* ========================================================================= */}
+          <div id="admin_pending_payouts_list" className="bg-gradient-to-br from-amber-500/10 via-amber-50/60 to-orange-50/40 border-2 border-amber-300 rounded-3xl p-5 sm:p-6 space-y-4 shadow-sm">
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pb-3 border-b border-amber-200">
+              <div className="flex items-center gap-2.5">
+                <div className="w-9 h-9 rounded-xl bg-amber-500 text-slate-950 flex items-center justify-center font-black shadow-sm shrink-0">
+                  <Clock className="w-5 h-5" />
+                </div>
+                <div>
+                  <div className="flex items-center gap-2 flex-wrap">
+                    <h4 className="text-base font-black text-slate-900">Pending Payout Requests</h4>
+                    <span className="bg-amber-500 text-slate-950 text-xs font-black px-2.5 py-0.5 rounded-full shadow-xs">
+                      {pendingRequestsToDisplay.length} Pending
+                    </span>
+                  </div>
+                  <p className="text-xs text-slate-600 font-medium mt-0.5">
+                    Live partner withdrawal requests awaiting approval and dynamic wallet balance adjustment.
+                  </p>
+                </div>
+              </div>
+
+              <div className="flex items-center gap-2 self-start sm:self-auto">
+                <button
+                  type="button"
+                  id="admin_refresh_pending_payouts_btn"
+                  onClick={() => fetchPendingPayouts()}
+                  disabled={isFetchingPending}
+                  className="px-3 py-1.5 bg-white hover:bg-amber-100 text-slate-700 hover:text-slate-900 border border-amber-300 rounded-xl text-xs font-bold transition flex items-center gap-1.5 shadow-xs cursor-pointer disabled:opacity-50"
+                  title="Refresh pending payouts from database"
+                >
+                  <RefreshCw className={`w-3.5 h-3.5 ${isFetchingPending ? 'animate-spin text-amber-600' : ''}`} />
+                  <span>Refresh Queue</span>
+                </button>
+              </div>
+            </div>
+
+            {pendingRequestsToDisplay.length === 0 ? (
+              <div className="py-8 text-center bg-white/80 rounded-2xl border border-dashed border-amber-300/80 p-6">
+                <div className="w-12 h-12 rounded-full bg-emerald-100 text-emerald-700 flex items-center justify-center mx-auto mb-2.5">
+                  <CheckCircle2 className="w-6 h-6" />
+                </div>
+                <div className="text-sm font-black text-slate-900">All Payout Requests Settled</div>
+                <p className="text-xs text-slate-500 max-w-md mx-auto mt-1">
+                  There are currently zero pending payout requests. When a shopkeeper seller or delivery rider requests a withdrawal, it will appear here immediately for review.
+                </p>
+              </div>
+            ) : (
+              <div className="grid grid-cols-1 gap-3">
+                {pendingRequestsToDisplay.map((req) => {
+                  const isProcessing = pendingActionLoadingId === req.id;
+                  const partnerName = req.user_name || req.driver_name || 'Partner';
+                  const partnerRole = req.user_role || (req.driver_id ? 'Delivery Rider' : 'Shop Seller');
+                  const upiId = req.upi_id || req.payout_upi_id || 'Not Provided';
+                  const formattedDate = req.created_at
+                    ? new Date(req.created_at).toLocaleString('en-IN', {
+                        day: 'numeric',
+                        month: 'short',
+                        year: 'numeric',
+                        hour: '2-digit',
+                        minute: '2-digit',
+                      })
+                    : 'Recent';
+
+                  return (
+                    <div
+                      key={req.id}
+                      className="bg-white rounded-2xl border border-amber-200/90 p-4 sm:p-5 shadow-xs hover:shadow-md transition flex flex-col lg:flex-row lg:items-center justify-between gap-4"
+                    >
+                      {/* Left: Partner Name, Type, Date, & Contact */}
+                      <div className="space-y-1.5 min-w-[240px]">
+                        <div className="flex items-center gap-2 flex-wrap">
+                          <span className="text-sm sm:text-base font-black text-slate-900">
+                            {partnerName}
+                          </span>
+                          <span className="px-2.5 py-0.5 rounded-md text-[11px] font-black uppercase tracking-wider bg-orange-100 text-orange-800 border border-orange-200">
+                            {partnerRole}
+                          </span>
+                          {(req.user_phone || req.driver_phone) && (
+                            <a
+                              href={`tel:${req.user_phone || req.driver_phone}`}
+                              className="text-xs text-slate-500 hover:text-slate-900 font-medium flex items-center gap-1 transition"
+                            >
+                              <Phone className="w-3 h-3 text-slate-400" />
+                              {req.user_phone || req.driver_phone}
+                            </a>
+                          )}
+                        </div>
+
+                        <div className="flex items-center gap-3 text-xs text-slate-500 flex-wrap">
+                          <span className="flex items-center gap-1">
+                            <Clock className="w-3.5 h-3.5 text-amber-500" />
+                            <span>Requested on: <strong>{formattedDate}</strong></span>
+                          </span>
+
+                          <div className="flex items-center gap-1.5 bg-slate-100 px-2.5 py-1 rounded-lg border border-slate-200 text-slate-800 font-mono text-xs">
+                            <QrCode className="w-3.5 h-3.5 text-slate-600" />
+                            <span>UPI: <strong>{upiId}</strong></span>
+                            {upiId !== 'Not Provided' && (
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  navigator.clipboard.writeText(upiId);
+                                  setCopiedUpi(upiId);
+                                  setTimeout(() => setCopiedUpi(null), 2500);
+                                }}
+                                className="ml-1 text-slate-500 hover:text-slate-900 transition cursor-pointer"
+                                title="Copy UPI ID"
+                              >
+                                {copiedUpi === upiId ? (
+                                  <span className="text-[10px] font-bold text-emerald-600">Copied!</span>
+                                ) : (
+                                  <Copy className="w-3 h-3" />
+                                )}
+                              </button>
+                            )}
+                          </div>
+                        </div>
+                      </div>
+
+                      {/* Middle: Requested Amount */}
+                      <div className="bg-amber-50/80 border border-amber-200 rounded-xl px-4 py-2.5 text-left sm:text-center shrink-0">
+                        <div className="text-[10px] uppercase font-bold text-amber-800 tracking-wider">
+                          Requested Amount
+                        </div>
+                        <div className="text-xl sm:text-2xl font-black text-slate-900">
+                          ₹{formatPrice(req.amount)}
+                        </div>
+                      </div>
+
+                      {/* Right: Functional Action Buttons */}
+                      <div className="flex items-center gap-2 shrink-0 pt-2 lg:pt-0 border-t lg:border-t-0 border-slate-100">
+                        <button
+                          type="button"
+                          id={`approve_pending_payout_${req.id}`}
+                          onClick={() => handleApprovePendingPayout(req)}
+                          disabled={isProcessing}
+                          className="flex-1 lg:flex-initial px-4 py-2.5 bg-emerald-600 hover:bg-emerald-700 active:scale-95 text-white font-black text-xs rounded-xl shadow-xs transition flex items-center justify-center gap-1.5 cursor-pointer disabled:opacity-50"
+                        >
+                          <Check className="w-4 h-4 text-white" />
+                          <span>{isProcessing ? 'Approving...' : 'Approve Payment'}</span>
+                        </button>
+
+                        <button
+                          type="button"
+                          id={`reject_pending_payout_${req.id}`}
+                          onClick={() => handleRejectPendingPayout(req)}
+                          disabled={isProcessing}
+                          className="flex-1 lg:flex-initial px-3.5 py-2.5 bg-rose-50 hover:bg-rose-100 active:scale-95 text-rose-700 hover:text-rose-800 font-bold text-xs rounded-xl border border-rose-200 transition flex items-center justify-center gap-1.5 cursor-pointer disabled:opacity-50"
+                        >
+                          <X className="w-4 h-4 text-rose-600" />
+                          <span>Reject Request</span>
+                        </button>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+          </div>
           <div className="flex items-center gap-2 border-b border-slate-200 pb-3 overflow-x-auto">
             <button
               type="button"

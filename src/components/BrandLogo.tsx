@@ -16,9 +16,10 @@ import {
   Wheat,
   Tag,
 } from 'lucide-react';
+import logoImg from '../assets/logo.png';
 
-export const APP_LOGO_SRC = '/logo.png';
-export const APP_LOGO_FALLBACK = '/file_0000000026d481f590b090e6f011359e.png';
+export const APP_LOGO_SRC = logoImg;
+export const APP_LOGO_FALLBACK = '/logo.png';
 
 interface BrandIconProps {
   size?: 'xs' | 'sm' | 'md' | 'lg' | 'xl' | number;
@@ -55,7 +56,7 @@ export const BrandIcon: React.FC<BrandIconProps> = ({
         onError={(e) => {
           // Fallback if main path fails
           const target = e.currentTarget;
-          if (!target.src.includes('file_0000000026d481f590b090e6f011359e.png')) {
+          if (target.src !== APP_LOGO_FALLBACK) {
             target.src = APP_LOGO_FALLBACK;
           }
         }}

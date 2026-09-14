@@ -2750,7 +2750,7 @@ export function App() {
 
   const handleUpdateDeliveryOrderStatus = async (
     orderId: string,
-    newStatus: 'out_for_delivery' | 'delivered_by_boy' | 'delivered' | 'success'
+    newStatus: 'ready_for_pickup' | 'out_for_delivery' | 'delivered_by_boy' | 'delivered' | 'success' | string
   ) => {
     const isDriverMarked = newStatus === 'delivered_by_boy';
     const isCompleted = newStatus === 'success' || newStatus === 'delivered';
@@ -3854,6 +3854,7 @@ export function App() {
             onDeleteListing={handleDeleteListing}
             onToggleListingStatus={handleToggleListingStatus}
             onRequestPayout={handleRequestPayout}
+            onUpdateOrderStatus={handleUpdateDeliveryOrderStatus}
           />
         )}
 

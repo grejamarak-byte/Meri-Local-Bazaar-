@@ -13,6 +13,7 @@ import {
 import { AppRoute, UserProfile } from '../types';
 import { supabase } from '../lib/supabase';
 import { BrandLogo } from './BrandLogo';
+import logoImg from '../assets/logo.png';
 
 interface LoginScreenProps {
   onLoginSuccess: (user: UserProfile, targetRoute?: AppRoute) => void;
@@ -275,13 +276,13 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({
             <div className="mx-auto mb-3.5 flex justify-center">
               <div className="w-20 h-20 sm:w-24 sm:h-24 rounded-3xl bg-white p-1.5 shadow-2xl ring-4 ring-white/40 flex items-center justify-center overflow-hidden transition transform hover:scale-105">
                 <img
-                  src="/logo.png"
+                  src={logoImg}
                   alt="Meri Local Bazaar"
                   referrerPolicy="no-referrer"
                   onError={(e) => {
                     const target = e.currentTarget;
-                    if (!target.src.includes('file_0000000026d481f590b090e6f011359e.png')) {
-                      target.src = '/file_0000000026d481f590b090e6f011359e.png';
+                    if (target.src !== '/logo.png') {
+                      target.src = '/logo.png';
                     }
                   }}
                   className="w-full h-full object-cover rounded-2xl"
