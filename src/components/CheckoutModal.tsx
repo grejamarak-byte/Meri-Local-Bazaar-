@@ -12,7 +12,6 @@ import {
   CreditCard,
   Lock,
   Info,
-  AlertCircle,
   ArrowRight,
   Sparkles,
   FileText,
@@ -86,10 +85,9 @@ export const CheckoutModal: React.FC<CheckoutModalProps> = ({
   const [policyModalOpen, setPolicyModalOpen] = useState(false);
   const [selectedPolicyType, setSelectedPolicyType] = useState<PolicyType>('terms_conditions');
 
-  // Delivery estimation for home delivery (starting parameters: 1/2 kg, 1/2 km)
-  const initialWeight = listing?.weight_kg || (listing?.weight ? parseFloat(String(listing.weight)) : 0.5) || 0.5;
-  const [weightKg, setWeightKg] = useState<number>(initialWeight);
-  const [distanceKm, setDistanceKm] = useState<number>(0.5);
+  // Delivery estimation for home delivery
+  const [weightKg, setWeightKg] = useState<number>(3);
+  const [distanceKm, setDistanceKm] = useState<number>(5);
   const [terrain, setTerrain] = useState<'Plain' | 'Hill (5km/L)'>('Hill (5km/L)');
 
   // Advance Payment Verification Inputs
@@ -388,17 +386,6 @@ export const CheckoutModal: React.FC<CheckoutModalProps> = ({
               <Info className="w-4 h-4 text-blue-600 shrink-0 mt-0.5" />
               <p>
                 Jab tak Admin aapke UTR number aur screenshot ko verify nahi karta, tab tak order status <strong>'Pending Verification'</strong> rahega. Approval ke baad seller dispatch karega.
-              </p>
-            </div>
-
-            {/* MANDATORY BUYER INSPECTION & DELIVERY NOTICE */}
-            <div className="bg-amber-50 border-2 border-amber-400/80 rounded-2xl p-4 text-xs text-amber-950 text-left max-w-md mx-auto space-y-1.5 shadow-sm">
-              <div className="flex items-center gap-2 font-black text-amber-900 uppercase tracking-wide">
-                <AlertCircle className="w-4 h-4 text-amber-700 shrink-0" />
-                <span>IMPORTANT NOTICE TO ALL BUYERS</span>
-              </div>
-              <p className="leading-relaxed font-semibold">
-                Every buyer must thoroughly inspect the ordered product, its physical condition, and the expiry date BEFORE confirming the delivery. Once you confirm the delivery, the payment is released, and the platform will not be able to offer any refunds, support, or help under any circumstances.
               </p>
             </div>
 
@@ -797,17 +784,6 @@ export const CheckoutModal: React.FC<CheckoutModalProps> = ({
               </div>
             </div>
 
-            {/* MANDATORY BUYER INSPECTION & DELIVERY NOTICE */}
-            <div className="p-3.5 bg-amber-50/90 border-2 border-amber-300 rounded-2xl text-xs text-amber-950 space-y-1.5 shadow-xs">
-              <div className="flex items-center gap-1.5 font-black text-amber-900 uppercase tracking-wide text-[11px]">
-                <AlertCircle className="w-4 h-4 text-amber-700 shrink-0" />
-                <span>IMPORTANT NOTICE TO ALL BUYERS</span>
-              </div>
-              <p className="text-[11px] leading-relaxed font-semibold">
-                Every buyer must thoroughly inspect the ordered product, its physical condition, and the expiry date BEFORE confirming the delivery. Once you confirm the delivery, the payment is released, and the platform will not be able to offer any refunds, support, or help under any circumstances.
-              </p>
-            </div>
-
             {/* MANDATORY TERMS & PRIVACY CONSENT CHECKBOX (UNCHECKED BY DEFAULT) */}
             <div
               id="buyer_checkout_policy_consent"
@@ -855,11 +831,11 @@ export const CheckoutModal: React.FC<CheckoutModalProps> = ({
                       <span>Privacy Policy</span>
                       <ExternalLink className="w-3 h-3 inline" />
                     </button>{' '}
-                    ko padhkar aur samajhkar accept karta/karti hoon. Mujhe samajh hai ki agar mera prepaid product order 'Out for Delivery' ho chuka hai, toh order cancel karne par Delivery Charges ka refund nahi milega."
+                    ko padhkar aur samajhkar accept karta/karti hoon. Mujhe poori tarah samajh hai ki delivery ke waqt mujhe product ki expiry date, packaging aur condition achhi tarah check karni hogi. Ek baar delivery accept/confirm karne ke baad product expiry ya condition par koi complaint, refund ya support help nahi di jayegi. Agar order 'Out for Delivery' hone ke baad cancel hota hai toh Delivery Charges ka refund ₹0 hoga."
                   </div>
 
-                  <div className="text-[11px] text-slate-500 font-normal italic border-t border-slate-200/80 pt-1.5">
-                    "I have read and agree to the Terms & Conditions and Privacy Policy. I understand that if my prepaid product order has already been marked Out for Delivery, Delivery Charges will not be refunded if I cancel the order."
+                  <div className="text-[11px] text-slate-500 font-normal italic border-t border-slate-200/80 pt-1.5 leading-relaxed">
+                    "I have read and agree to the Terms & Conditions and Privacy Policy. I acknowledge that I must thoroughly inspect product expiry dates and packaging integrity at the exact time of delivery. Once delivery is confirmed, no subsequent complaints, refunds, or support requests regarding product expiry or condition will be entertained."
                   </div>
                 </label>
               </div>

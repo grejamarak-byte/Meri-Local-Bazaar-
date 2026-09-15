@@ -151,9 +151,11 @@ export const DeliveryPartnerDashboard: React.FC<DeliveryPartnerDashboardProps> =
     .filter((p) => p.status === 'approved' || p.status === 'completed')
     .reduce((sum, p) => sum + (p.amount || 0), 0);
 
+  // Authoritative driver wallet balance synchronized with public.profiles.wallet_balance
+  const currentBaseBalance = Number(currentUser.wallet_balance ?? 0);
   const availableDriverWalletBalance = Math.max(
     0,
-    (currentUser.wallet_balance ?? 3500) + totalPartnerEarnedToday - completedPayoutAmount - pendingPayoutAmount
+    currentBaseBalance - pendingPayoutAmount
   );
 
   const handleCreateNewShipment = (e: React.FormEvent) => {

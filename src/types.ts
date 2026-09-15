@@ -22,8 +22,6 @@ export interface Listing extends LocalAddressFields {
   whatsapp?: string;
   images_json?: string;
   image_urls?: string[];
-  weight?: string | number;
-  weight_kg?: number;
   is_featured?: boolean;
   is_pro?: boolean;
   is_heavy_item?: boolean;
@@ -47,8 +45,8 @@ export interface UserProfile extends LocalAddressFields {
   permanent_address?: string;
   role: 'customer' | 'seller' | 'delivery_partner' | 'admin' | 'super_admin' | 'user' | string;
   account_status?: 'active' | 'inactive';
-  plan_status?: 'active' | 'inactive' | string;
-  plan_title?: string;
+  plan_status?: 'active' | 'inactive' | 'pending' | 'expired' | string;
+  plan_name?: string;
   plan_expiry_date?: string | null;
   is_pro: boolean;
   pro_status?: 'active' | 'inactive' | string;
@@ -390,11 +388,8 @@ export function calculateDeliveryFare(
   appCommission: number;
   partnerEarning: number;
 } {
-  // Base delivery starting parameters: "1/2 kg" (0.5 kg) and "1/2 km" (0.5 km)
-  const baseWeightKg = 0.5;
-  const baseDistanceKm = 0.5;
-  const wt = Math.max(baseWeightKg, Number(weightKg) || baseWeightKg);
-  const km = Math.max(baseDistanceKm, Number(distanceKm) || baseDistanceKm);
+  const wt = Math.max(0, weightKg);
+  const km = Math.max(0, distanceKm);
   let totalFare = 0;
 
   if (terrain === 'Hill (5km/L)') {
@@ -423,7 +418,6 @@ export interface RechargeRequest {
   user_email: string;
   user_phone: string;
   plan_name: string;
-  plan_title?: string;
   amount: number;
   utr: string;
   screenshot_url?: string;
@@ -477,7 +471,6 @@ export interface ShopRegistration extends LocalAddressFields {
   user_id: string;
   user_name: string;
   user_phone: string;
-  phone?: string;
   user_email?: string;
   shop_name: string;
   category: string;
@@ -508,8 +501,6 @@ export interface VehicleRegistration extends LocalAddressFields {
   user_id: string;
   driver_name: string;
   driver_phone: string;
-  owner_phone?: string;
-  phone?: string;
   driver_whatsapp?: string;
   driver_email?: string;
   vehicle_type: 'Local Cab / Taxi' | 'Traveler (12-26 Seater)' | 'Auto Rickshaw' | 'Commercial Bike' | 'Pickup / Commercial Van' | string;
@@ -661,9 +652,53 @@ export interface PayoutLog {
   role?: string;
 }
 
+export interface AppNotification {
+  id: string;
+  user_id?: string;
+  title: string;
+  message: string;
+  type?: 'wallet' | 'payout' | 'order' | 'plan' | 'alert' | 'general' | string;
+  data?: Record<string, any>;
+  is_read?: boolean;
+  created_at: string;
+}
+
 export function isMasterAdmin(user?: UserProfile | null): boolean {
   if (!user || !user.email) return false;
   return user.email.toLowerCase().trim() === 'silgrakmarak1309@gmail.com';
+}
+
+/**
+ * Checks if a user has an active monthly subscription plan.
+ * Master Admin has active privileges by default.
+ * Regular users must have plan_status === 'active', pro_status === 'active', or is_pro === true.
+ */
+export function isUserPlanActive(user?: UserProfile | null): boolean {
+  if (!user) return false;
+  if (isMasterAdmin(user)) return true;
+
+  // 1. Direct plan_status check
+  if (
+    typeof user.plan_status === 'string' &&
+    (user.plan_status.toLowerCase() === 'active' || user.plan_status.toLowerCase() === 'approved')
+  ) {
+    return true;
+  }
+
+  // 2. Pro status check
+  if (
+    typeof user.pro_status === 'string' &&
+    (user.pro_status.toLowerCase() === 'active' || user.pro_status.toLowerCase() === 'approved')
+  ) {
+    return true;
+  }
+
+  // 3. Boolean is_pro flag
+  if (user.is_pro === true) {
+    return true;
+  }
+
+  return false;
 }
 
 

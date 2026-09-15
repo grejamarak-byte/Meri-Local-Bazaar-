@@ -26,7 +26,7 @@ import {
   Check,
   Search,
 } from 'lucide-react';
-import { supabase, updateUserPlanActiveDirect } from './lib/supabase';
+import { supabase } from './lib/supabase';
 import { generateUuid, ensureUuid } from './lib/uuid';
 import { BrandLogo, BrandIcon } from './components/BrandLogo';
 import {
@@ -44,6 +44,8 @@ import {
   Wallet,
   PayoutLog,
   isMasterAdmin,
+  isUserPlanActive,
+  formatPrice,
 } from './types';
 import { AdminControlRoom } from './components/AdminControlRoom';
 import { UserMarketplace } from './components/UserMarketplace';
@@ -63,12 +65,15 @@ import { LoginScreen } from './components/LoginScreen';
 import { CheckoutModal } from './components/CheckoutModal';
 import { PolicyModal } from './components/PolicyModal';
 import { SearchModal } from './components/SearchModal';
+import { GlobalToastContainer, NotificationBell } from './components/NotificationCenter';
 import { PolicyType } from './types';
 import { fetchUserCart, addToCart, clearUserCart } from './lib/cart';
 import {
   sendPushNotification,
   sendOrderAlertToPartner,
   checkAndSend3DaysPlanExpiryAlerts,
+  dispatchAppToast,
+  recordAppNotification,
 } from './lib/notifications';
 
 // Resilient initial data for fast load & offline fallback
@@ -1004,8 +1009,11 @@ export function App() {
           village: profile?.village || '',
           permanent_address: profile?.permanent_address || '',
           role: (profile?.role || (isUserAdmin ? 'admin' : 'user')) as any,
+          plan_status: profile?.plan_status || (profile?.is_pro ? 'active' : (isUserAdmin ? 'active' : 'inactive')),
+          plan_name: profile?.plan_name || (profile?.is_pro ? 'PRO Monthly Plan' : undefined),
+          plan_expiry_date: profile?.plan_expiry_date || profile?.pro_expiry || null,
           is_pro: profile?.is_pro ?? isUserAdmin,
-          pro_status: profile?.pro_status || (isUserAdmin ? 'active' : 'inactive'),
+          pro_status: profile?.pro_status || (profile?.plan_status === 'active' ? 'active' : (isUserAdmin ? 'active' : 'inactive')),
           pro_expiry: profile?.pro_expiry || (isUserAdmin ? '2030-12-31' : undefined),
           is_delivery_partner: profile?.is_delivery_partner || false,
           partner_status: profile?.partner_status || 'none',
@@ -1290,22 +1298,13 @@ export function App() {
     }
   };
 
-  // Admin Approve Recharge
+  // Admin Approve Recharge (Monthly Plan Request)
   const handleApproveRecharge = async (req: RechargeRequest) => {
     const approvedTimestamp = new Date().toISOString();
-    const expiryDate = new Date(Date.now() + 30 * 86400000).toISOString().split('T')[0];
+    const expiryIso = new Date(Date.now() + 30 * 86400000).toISOString();
+    const expiryDate = expiryIso.split('T')[0];
 
-    // 1. Direct Supabase update query on 'profiles' table to change user's plan status to 'active' & is_pro = true
-    await updateUserPlanActiveDirect({
-      userId: req.user_id,
-      email: req.user_email,
-      phone: req.user_phone,
-      isPro: true,
-      planStatus: 'active',
-      planTitle: req.plan_title || 'Monthly PRO Membership',
-      daysValid: 30,
-    });
-
+    // 1. Update recharge request status
     setRechargeRequests((prev) =>
       prev.map((r) =>
         r.id === req.id
@@ -1314,36 +1313,48 @@ export function App() {
       )
     );
 
+    const targetUserId = req.user_id;
+    const targetEmail = req.user_email?.trim().toLowerCase();
+    const targetPhone = req.user_phone?.trim();
+
+    const matchesUser = (p: UserProfile) =>
+      Boolean(
+        (targetUserId && p.id === targetUserId) ||
+        (targetEmail && p.email && p.email.trim().toLowerCase() === targetEmail) ||
+        (targetPhone && p.phone && p.phone.trim() === targetPhone)
+      );
+
+    // 2. Immediately update user profiles in frontend state with active plan
     setProfiles((prev) =>
       prev.map((p) =>
-        (req.user_id && p.id === req.user_id) ||
-        (req.user_email && p.email === req.user_email) ||
-        (req.user_phone && p.phone === req.user_phone)
+        matchesUser(p)
           ? {
               ...p,
               is_pro: true,
               pro_status: 'active',
               plan_status: 'active',
-              plan_title: req.plan_title || 'Monthly PRO Membership',
+              account_status: 'active',
+              is_approved_by_admin: true,
+              plan_name: req.plan_name || 'PRO Monthly Plan',
               pro_expiry: expiryDate,
+              plan_expiry_date: expiryIso,
             }
           : p
       )
     );
 
-    if (
-      currentUser &&
-      ((req.user_id && currentUser.id === req.user_id) ||
-        (req.user_email && currentUser.email === req.user_email) ||
-        (req.user_phone && currentUser.phone === req.user_phone))
-    ) {
-      const updatedUser = {
+    // 3. Immediately update currentUser if the approved user is currently logged in
+    if (currentUser && matchesUser(currentUser)) {
+      const updatedUser: UserProfile = {
         ...currentUser,
         is_pro: true,
         pro_status: 'active',
         plan_status: 'active',
-        plan_title: req.plan_title || 'Monthly PRO Membership',
+        account_status: 'active',
+        is_approved_by_admin: true,
+        plan_name: req.plan_name || 'PRO Monthly Plan',
         pro_expiry: expiryDate,
+        plan_expiry_date: expiryIso,
       };
       setCurrentUser(updatedUser);
       try {
@@ -1351,6 +1362,7 @@ export function App() {
       } catch (_) {}
     }
 
+    // 4. Immediately update Supabase database tables
     if (supabase) {
       try {
         await supabase
@@ -1358,7 +1370,59 @@ export function App() {
           .update({ status: 'approved', approved_at: approvedTimestamp })
           .eq('id', req.id);
       } catch (e) {
-        console.error('Failed to approve recharge in database:', e);
+        console.error('Failed to update recharge_requests in database:', e);
+      }
+
+      const updatePayload: any = {
+        is_pro: true,
+        pro_status: 'active',
+        plan_status: 'active',
+        account_status: 'active',
+        is_approved_by_admin: true,
+        plan_name: req.plan_name || 'PRO Monthly Plan',
+        pro_expiry: expiryDate,
+        plan_expiry_date: expiryIso,
+      };
+
+      try {
+        if (targetUserId) {
+          try {
+            await supabase.from('profiles').update(updatePayload).eq('id', targetUserId);
+          } catch (_) {
+            await supabase.from('profiles').update({
+              is_pro: true,
+              pro_status: 'active',
+              is_approved_by_admin: true,
+              pro_expiry: expiryDate,
+            }).eq('id', targetUserId);
+          }
+        }
+
+        if (targetEmail) {
+          try {
+            await supabase.from('profiles').update(updatePayload).ilike('email', targetEmail);
+          } catch (_) {
+            await supabase.from('profiles').update({
+              is_pro: true,
+              pro_status: 'active',
+              is_approved_by_admin: true,
+            }).ilike('email', targetEmail);
+          }
+        }
+
+        if (targetPhone) {
+          try {
+            await supabase.from('profiles').update(updatePayload).eq('phone', targetPhone);
+          } catch (_) {
+            await supabase.from('profiles').update({
+              is_pro: true,
+              pro_status: 'active',
+              is_approved_by_admin: true,
+            }).eq('phone', targetPhone);
+          }
+        }
+      } catch (e) {
+        console.error('Failed to approve user monthly plan in database:', e);
       }
     }
   };
@@ -1381,48 +1445,75 @@ export function App() {
   // Admin Toggle User PRO
   const handleToggleUserPro = async (user: UserProfile) => {
     const newProState = !user.is_pro;
-    const newPlanStatus = newProState ? 'active' : 'inactive';
+    const newStatus = newProState ? 'active' : 'inactive';
     const expiryDate = newProState
-      ? new Date(Date.now() + 365 * 86400000).toISOString().split('T')[0]
+      ? new Date(Date.now() + 30 * 86400000).toISOString().split('T')[0]
       : undefined;
-
-    // Direct Supabase update query on 'profiles' table
-    await updateUserPlanActiveDirect({
-      userId: user.id,
-      email: user.email,
-      phone: user.phone,
-      isPro: newProState,
-      planStatus: newPlanStatus,
-      planTitle: newProState ? 'Admin Granted PRO' : 'Free Buyer',
-      daysValid: newProState ? 365 : 0,
-    });
+    const expiryIso = newProState
+      ? new Date(Date.now() + 30 * 86400000).toISOString()
+      : null;
 
     setProfiles((prev) =>
       prev.map((p) =>
-        p.id === user.id
+        p.id === user.id || (user.email && p.email === user.email)
           ? {
               ...p,
               is_pro: newProState,
-              pro_status: newPlanStatus,
-              plan_status: newPlanStatus,
+              pro_status: newStatus,
+              plan_status: newStatus,
+              account_status: 'active',
+              is_approved_by_admin: newProState ? true : p.is_approved_by_admin,
               pro_expiry: expiryDate,
+              plan_expiry_date: expiryIso,
             }
           : p
       )
     );
 
-    if (currentUser && currentUser.id === user.id) {
-      const updatedUser = {
+    if (currentUser && (currentUser.id === user.id || (user.email && currentUser.email === user.email))) {
+      const updated: UserProfile = {
         ...currentUser,
         is_pro: newProState,
-        pro_status: newPlanStatus,
-        plan_status: newPlanStatus,
+        pro_status: newStatus,
+        plan_status: newStatus,
+        account_status: 'active',
+        is_approved_by_admin: newProState ? true : currentUser.is_approved_by_admin,
         pro_expiry: expiryDate,
+        plan_expiry_date: expiryIso,
       };
-      setCurrentUser(updatedUser);
+      setCurrentUser(updated);
       try {
-        localStorage.setItem('mlb_active_user', JSON.stringify(updatedUser));
+        localStorage.setItem('mlb_active_user', JSON.stringify(updated));
       } catch (_) {}
+    }
+
+    if (supabase) {
+      try {
+        await supabase
+          .from('profiles')
+          .update({
+            is_pro: newProState,
+            pro_status: newStatus,
+            plan_status: newStatus,
+            account_status: 'active',
+            is_approved_by_admin: newProState ? true : undefined,
+            pro_expiry: expiryDate,
+            plan_expiry_date: expiryIso,
+          })
+          .eq('id', user.id);
+      } catch (e) {
+        try {
+          await supabase
+            .from('profiles')
+            .update({
+              is_pro: newProState,
+              pro_status: newStatus,
+            })
+            .eq('id', user.id);
+        } catch (err) {
+          console.error('Failed to toggle PRO in database:', err);
+        }
+      }
     }
   };
 
@@ -1449,6 +1540,7 @@ export function App() {
     vehicleType?: string,
     vehicleNumber?: string
   ) => {
+    const isApproved = partnerStatus === 'approved' || partnerStatus === 'active';
     setProfiles((prev) =>
       prev.map((p) =>
         p.id === userId
@@ -1459,10 +1551,33 @@ export function App() {
               vehicle_type: vehicleType || p.vehicle_type,
               vehicle_number: vehicleNumber || p.vehicle_number,
               role: isDeliveryPartner && p.role === 'user' ? 'delivery_partner' : p.role,
+              is_approved_by_admin: isApproved ? true : p.is_approved_by_admin,
+              plan_status: isApproved ? 'active' : p.plan_status,
+              pro_status: isApproved ? 'active' : p.pro_status,
+              is_pro: isApproved ? true : p.is_pro,
             }
           : p
       )
     );
+
+    if (currentUser && currentUser.id === userId) {
+      const updated: UserProfile = {
+        ...currentUser,
+        is_delivery_partner: isDeliveryPartner,
+        partner_status: partnerStatus,
+        vehicle_type: vehicleType || currentUser.vehicle_type,
+        vehicle_number: vehicleNumber || currentUser.vehicle_number,
+        role: isDeliveryPartner && currentUser.role === 'user' ? 'delivery_partner' : currentUser.role,
+        is_approved_by_admin: isApproved ? true : currentUser.is_approved_by_admin,
+        plan_status: isApproved ? 'active' : currentUser.plan_status,
+        pro_status: isApproved ? 'active' : currentUser.pro_status,
+        is_pro: isApproved ? true : currentUser.is_pro,
+      };
+      setCurrentUser(updated);
+      try {
+        localStorage.setItem('mlb_active_user', JSON.stringify(updated));
+      } catch (_) {}
+    }
 
     if (supabase) {
       try {
@@ -1473,6 +1588,10 @@ export function App() {
             partner_status: partnerStatus,
             vehicle_type: vehicleType,
             vehicle_number: vehicleNumber,
+            is_approved_by_admin: isApproved ? true : undefined,
+            plan_status: isApproved ? 'active' : undefined,
+            pro_status: isApproved ? 'active' : undefined,
+            is_pro: isApproved ? true : undefined,
           })
           .eq('id', userId);
       } catch (e) {
@@ -1483,36 +1602,27 @@ export function App() {
 
   // Admin Toggle is_approved_by_admin for Profiles
   const handleToggleProfileApproval = async (profile: UserProfile, approved: boolean) => {
-    if (approved) {
-      // Direct Supabase update query on 'profiles' table
-      await updateUserPlanActiveDirect({
-        userId: profile.id,
-        email: profile.email,
-        phone: profile.phone,
-        isPro: true,
-        planStatus: 'active',
-        planTitle: 'Admin Approved PRO',
-        daysValid: 30,
-      });
-    }
-
     setProfiles((prev) =>
       prev.map((p) =>
         p.id === profile.id || (profile.email && p.email === profile.email)
           ? {
               ...p,
               is_approved_by_admin: approved,
-              ...(approved ? { is_pro: true, pro_status: 'active', plan_status: 'active' } : {}),
+              plan_status: approved ? 'active' : p.plan_status,
+              pro_status: approved ? 'active' : p.pro_status,
+              is_pro: approved ? true : p.is_pro,
             }
           : p
       )
     );
 
     if (currentUser && (currentUser.id === profile.id || (profile.email && currentUser.email === profile.email))) {
-      const updated = {
+      const updated: UserProfile = {
         ...currentUser,
         is_approved_by_admin: approved,
-        ...(approved ? { is_pro: true, pro_status: 'active', plan_status: 'active' } : {}),
+        plan_status: approved ? 'active' : currentUser.plan_status,
+        pro_status: approved ? 'active' : currentUser.pro_status,
+        is_pro: approved ? true : currentUser.is_pro,
       };
       setCurrentUser(updated);
       try {
@@ -1526,11 +1636,20 @@ export function App() {
           .from('profiles')
           .update({
             is_approved_by_admin: approved,
-            ...(approved ? { is_pro: true, pro_status: 'active', plan_status: 'active' } : {}),
+            plan_status: approved ? 'active' : profile.plan_status,
+            pro_status: approved ? 'active' : profile.pro_status,
+            is_pro: approved ? true : profile.is_pro,
           })
           .eq('id', profile.id);
       } catch (e) {
-        console.warn('Supabase toggle profile approval sync:', e);
+        try {
+          await supabase
+            .from('profiles')
+            .update({ is_approved_by_admin: approved })
+            .eq('id', profile.id);
+        } catch (err) {
+          console.warn('Supabase toggle profile approval sync:', err);
+        }
       }
     }
   };
@@ -1656,6 +1775,7 @@ export function App() {
   ) => {
     const newReq: RechargeRequest = {
       id: `rec_${Date.now()}`,
+      user_id: currentUser?.id || reqData.user_id,
       ...reqData,
       status: 'pending',
       created_at: new Date().toISOString(),
@@ -1855,55 +1975,98 @@ export function App() {
 
   const handleApproveShopRegistration = async (id: string) => {
     const verifiedTimestamp = new Date().toISOString();
-    const targetShop = shopRegistrations.find((s) => s.id === id);
+    const expiryIso = new Date(Date.now() + 30 * 86400000).toISOString();
+    const expiryDate = expiryIso.split('T')[0];
 
-    if (targetShop) {
-      // Direct Supabase update query on 'profiles' table to change that specific user's plan status to 'active' & is_pro = true
-      await updateUserPlanActiveDirect({
-        userId: targetShop.user_id,
-        phone: targetShop.phone,
-        isPro: true,
-        planStatus: 'active',
-        planTitle: 'Shop Partner Monthly Plan',
-        daysValid: 30,
-      });
-
-      setProfiles((prev) =>
-        prev.map((p) =>
-          (targetShop.user_id && p.id === targetShop.user_id) || (targetShop.phone && p.phone === targetShop.phone)
-            ? { ...p, is_pro: true, pro_status: 'active', plan_status: 'active', is_approved_by_admin: true }
-            : p
-        )
-      );
-
-      if (
-        currentUser &&
-        ((targetShop.user_id && currentUser.id === targetShop.user_id) ||
-          (targetShop.phone && currentUser.phone === targetShop.phone))
-      ) {
-        const updated = {
-          ...currentUser,
-          is_pro: true,
-          pro_status: 'active',
-          plan_status: 'active',
-          is_approved_by_admin: true,
-        };
-        setCurrentUser(updated);
-        try {
-          localStorage.setItem('mlb_active_user', JSON.stringify(updated));
-        } catch (_) {}
-      }
-    }
+    const shop = shopRegistrations.find((s) => s.id === id);
 
     setShopRegistrations((prev) =>
       prev.map((s) => (s.id === id ? { ...s, status: 'approved', verified_at: verifiedTimestamp } : s))
     );
+
+    if (shop) {
+      const targetUserId = shop.user_id;
+      const targetPhone = shop.user_phone;
+      const matchesOwner = (p: UserProfile) =>
+        Boolean(
+          (targetUserId && p.id === targetUserId) ||
+          (targetPhone && p.phone && p.phone.trim() === targetPhone.trim())
+        );
+
+      setProfiles((prev) =>
+        prev.map((p) =>
+          matchesOwner(p)
+            ? {
+                ...p,
+                is_pro: true,
+                pro_status: 'active',
+                plan_status: 'active',
+                account_status: 'active',
+                is_approved_by_admin: true,
+                shop_name: shop.shop_name,
+                shop_category: shop.category,
+                role: p.role === 'admin' ? 'admin' : 'seller',
+                pro_expiry: expiryDate,
+                plan_expiry_date: expiryIso,
+              }
+            : p
+        )
+      );
+
+      if (currentUser && matchesOwner(currentUser)) {
+        const updatedUser: UserProfile = {
+          ...currentUser,
+          is_pro: true,
+          pro_status: 'active',
+          plan_status: 'active',
+          account_status: 'active',
+          is_approved_by_admin: true,
+          shop_name: shop.shop_name,
+          shop_category: shop.category,
+          role: currentUser.role === 'admin' ? 'admin' : 'seller',
+          pro_expiry: expiryDate,
+          plan_expiry_date: expiryIso,
+        };
+        setCurrentUser(updatedUser);
+        try {
+          localStorage.setItem('mlb_active_user', JSON.stringify(updatedUser));
+        } catch (_) {}
+      }
+    }
+
     if (supabase) {
       try {
         await supabase
           .from('shop_registrations')
           .update({ status: 'approved', verified_at: verifiedTimestamp })
           .eq('id', id);
+
+        if (shop?.user_id) {
+          try {
+            await supabase
+              .from('profiles')
+              .update({
+                is_pro: true,
+                pro_status: 'active',
+                plan_status: 'active',
+                account_status: 'active',
+                is_approved_by_admin: true,
+                shop_name: shop.shop_name,
+                shop_category: shop.category,
+              })
+              .eq('id', shop.user_id);
+          } catch (_) {
+            await supabase
+              .from('profiles')
+              .update({
+                is_pro: true,
+                pro_status: 'active',
+                is_approved_by_admin: true,
+                shop_name: shop.shop_name,
+              })
+              .eq('id', shop.user_id);
+          }
+        }
       } catch (e) {
         console.error('Approve shop registration:', e);
       }
@@ -1928,55 +2091,95 @@ export function App() {
 
   const handleApproveVehicleRegistration = async (id: string) => {
     const verifiedTimestamp = new Date().toISOString();
-    const targetVeh = vehicleRegistrations.find((v) => v.id === id);
+    const expiryIso = new Date(Date.now() + 30 * 86400000).toISOString();
+    const expiryDate = expiryIso.split('T')[0];
 
-    if (targetVeh) {
-      // Direct Supabase update query on 'profiles' table to change that specific driver user's plan status to 'active' & is_pro = true
-      await updateUserPlanActiveDirect({
-        userId: targetVeh.user_id,
-        phone: targetVeh.owner_phone,
-        isPro: true,
-        planStatus: 'active',
-        planTitle: 'Cab & Taxi Driver Monthly Plan',
-        daysValid: 30,
-      });
-
-      setProfiles((prev) =>
-        prev.map((p) =>
-          (targetVeh.user_id && p.id === targetVeh.user_id) || (targetVeh.owner_phone && p.phone === targetVeh.owner_phone)
-            ? { ...p, is_pro: true, pro_status: 'active', plan_status: 'active', is_approved_by_admin: true }
-            : p
-        )
-      );
-
-      if (
-        currentUser &&
-        ((targetVeh.user_id && currentUser.id === targetVeh.user_id) ||
-          (targetVeh.owner_phone && currentUser.phone === targetVeh.owner_phone))
-      ) {
-        const updated = {
-          ...currentUser,
-          is_pro: true,
-          pro_status: 'active',
-          plan_status: 'active',
-          is_approved_by_admin: true,
-        };
-        setCurrentUser(updated);
-        try {
-          localStorage.setItem('mlb_active_user', JSON.stringify(updated));
-        } catch (_) {}
-      }
-    }
+    const veh = vehicleRegistrations.find((v) => v.id === id);
 
     setVehicleRegistrations((prev) =>
       prev.map((v) => (v.id === id ? { ...v, status: 'approved', verified_at: verifiedTimestamp } : v))
     );
+
+    if (veh) {
+      const targetUserId = veh.user_id;
+      const targetPhone = veh.driver_phone;
+      const matchesDriver = (p: UserProfile) =>
+        Boolean(
+          (targetUserId && p.id === targetUserId) ||
+          (targetPhone && p.phone && p.phone.trim() === targetPhone.trim())
+        );
+
+      setProfiles((prev) =>
+        prev.map((p) =>
+          matchesDriver(p)
+            ? {
+                ...p,
+                is_pro: true,
+                pro_status: 'active',
+                plan_status: 'active',
+                account_status: 'active',
+                is_approved_by_admin: true,
+                vehicle_type: veh.vehicle_type,
+                vehicle_number: veh.vehicle_reg_no,
+                pro_expiry: expiryDate,
+                plan_expiry_date: expiryIso,
+              }
+            : p
+        )
+      );
+
+      if (currentUser && matchesDriver(currentUser)) {
+        const updatedUser: UserProfile = {
+          ...currentUser,
+          is_pro: true,
+          pro_status: 'active',
+          plan_status: 'active',
+          account_status: 'active',
+          is_approved_by_admin: true,
+          vehicle_type: veh.vehicle_type,
+          vehicle_number: veh.vehicle_reg_no,
+          pro_expiry: expiryDate,
+          plan_expiry_date: expiryIso,
+        };
+        setCurrentUser(updatedUser);
+        try {
+          localStorage.setItem('mlb_active_user', JSON.stringify(updatedUser));
+        } catch (_) {}
+      }
+    }
+
     if (supabase) {
       try {
         await supabase
           .from('vehicle_registrations')
           .update({ status: 'approved', verified_at: verifiedTimestamp })
           .eq('id', id);
+
+        if (veh?.user_id) {
+          try {
+            await supabase
+              .from('profiles')
+              .update({
+                is_pro: true,
+                pro_status: 'active',
+                plan_status: 'active',
+                account_status: 'active',
+                is_approved_by_admin: true,
+                vehicle_type: veh.vehicle_type,
+                vehicle_number: veh.vehicle_reg_no,
+              })
+              .eq('id', veh.user_id);
+          } catch (_) {
+            await supabase
+              .from('profiles')
+              .update({
+                is_pro: true,
+                pro_status: 'active',
+                is_approved_by_admin: true,
+              })
+              .eq('id', veh.user_id);
+          }
+        }
       } catch (e) {
         console.error('Approve vehicle registration:', e);
       }
@@ -2058,45 +2261,10 @@ export function App() {
 
   const handleApproveServiceRegistration = async (id: string) => {
     const verifiedTimestamp = new Date().toISOString();
-    const targetService = serviceRegistrations.find((s) => s.id === id);
+    const expiryIso = new Date(Date.now() + 30 * 86400000).toISOString();
+    const expiryDate = expiryIso.split('T')[0];
 
-    if (targetService) {
-      // Direct Supabase update query on 'profiles' table to change that specific user's plan status to 'active' & is_pro = true
-      await updateUserPlanActiveDirect({
-        userId: targetService.user_id,
-        phone: targetService.phone,
-        isPro: true,
-        planStatus: 'active',
-        planTitle: 'Local Service Partner Monthly Plan',
-        daysValid: 30,
-      });
-
-      setProfiles((prev) =>
-        prev.map((p) =>
-          (targetService.user_id && p.id === targetService.user_id) || (targetService.phone && p.phone === targetService.phone)
-            ? { ...p, is_pro: true, pro_status: 'active', plan_status: 'active', is_approved_by_admin: true }
-            : p
-        )
-      );
-
-      if (
-        currentUser &&
-        ((targetService.user_id && currentUser.id === targetService.user_id) ||
-          (targetService.phone && currentUser.phone === targetService.phone))
-      ) {
-        const updated = {
-          ...currentUser,
-          is_pro: true,
-          pro_status: 'active',
-          plan_status: 'active',
-          is_approved_by_admin: true,
-        };
-        setCurrentUser(updated);
-        try {
-          localStorage.setItem('mlb_active_user', JSON.stringify(updated));
-        } catch (_) {}
-      }
-    }
+    const srv = serviceRegistrations.find((s) => s.id === id);
 
     setServiceRegistrations((prev) =>
       prev.map((s) =>
@@ -2105,12 +2273,81 @@ export function App() {
           : s
       )
     );
+
+    if (srv) {
+      const targetUserId = srv.user_id;
+      const targetPhone = srv.phone;
+      const matchesProvider = (p: UserProfile) =>
+        Boolean(
+          (targetUserId && p.id === targetUserId) ||
+          (targetPhone && p.phone && p.phone.trim() === targetPhone.trim())
+        );
+
+      setProfiles((prev) =>
+        prev.map((p) =>
+          matchesProvider(p)
+            ? {
+                ...p,
+                is_pro: true,
+                pro_status: 'active',
+                plan_status: 'active',
+                account_status: 'active',
+                is_approved_by_admin: true,
+                pro_expiry: expiryDate,
+                plan_expiry_date: expiryIso,
+              }
+            : p
+        )
+      );
+
+      if (currentUser && matchesProvider(currentUser)) {
+        const updatedUser: UserProfile = {
+          ...currentUser,
+          is_pro: true,
+          pro_status: 'active',
+          plan_status: 'active',
+          account_status: 'active',
+          is_approved_by_admin: true,
+          pro_expiry: expiryDate,
+          plan_expiry_date: expiryIso,
+        };
+        setCurrentUser(updatedUser);
+        try {
+          localStorage.setItem('mlb_active_user', JSON.stringify(updatedUser));
+        } catch (_) {}
+      }
+    }
+
     if (supabase) {
       try {
         await supabase
           .from('service_registrations')
           .update({ is_approved: true, status: 'approved', verified_at: verifiedTimestamp })
           .eq('id', id);
+
+        if (srv?.user_id) {
+          try {
+            await supabase
+              .from('profiles')
+              .update({
+                is_pro: true,
+                pro_status: 'active',
+                plan_status: 'active',
+                account_status: 'active',
+                is_approved_by_admin: true,
+              })
+              .eq('id', srv.user_id);
+          } catch (_) {
+            await supabase
+              .from('profiles')
+              .update({
+                is_pro: true,
+                pro_status: 'active',
+                is_approved_by_admin: true,
+              })
+              .eq('id', srv.user_id);
+          }
+        }
       } catch (e) {
         console.error('Approve service registration:', e);
       }
@@ -2146,14 +2383,16 @@ export function App() {
     userName?: string,
     userPhone?: string
   ) => {
-    const currentWallet = wallets.find((w) => w.user_id === userId);
-    const currentBalance = currentWallet ? Number(currentWallet.balance) || 0 : 0;
+    const validUserId = ensureUuid(userId);
+    const targetProfile = profiles.find((p) => p.id === userId || p.id === validUserId);
+    const currentBalance = targetProfile && typeof targetProfile.wallet_balance === 'number'
+      ? Number(targetProfile.wallet_balance)
+      : (wallets.find((w) => w.user_id === userId || w.user_id === validUserId)?.balance || 0);
+
     const newBalance = Math.max(0, currentBalance - amount);
     const updatedTimestamp = new Date().toISOString();
     const txnId = `TXN-${Date.now().toString().slice(-8)}`;
-
     const validLogId = generateUuid();
-    const validUserId = ensureUuid(userId);
 
     const newLog: PayoutLog = {
       id: validLogId,
@@ -2168,7 +2407,21 @@ export function App() {
       role: role || 'Partner',
     };
 
-    // Update Wallets state
+    // 1. Standardize profiles state (authoritative source)
+    setProfiles((prev) =>
+      prev.map((p) =>
+        p.id === userId || p.id === validUserId
+          ? { ...p, wallet_balance: newBalance }
+          : p
+      )
+    );
+
+    // Update currentUser if matching
+    if (currentUser && (currentUser.id === userId || currentUser.id === validUserId)) {
+      setCurrentUser((prev) => (prev ? { ...prev, wallet_balance: newBalance } : null));
+    }
+
+    // 2. Standardize wallets state
     setWallets((prev) => {
       const exists = prev.some((w) => w.user_id === userId || w.user_id === validUserId);
       if (exists) {
@@ -2189,10 +2442,10 @@ export function App() {
       ];
     });
 
-    // Update Payout Logs state
+    // 3. Update Payout Logs state
     setPayoutLogs((prev) => [newLog, ...prev]);
 
-    // Update pending payout requests for this user if any
+    // 4. Update pending payout requests for this user if any
     setPayoutRequests((prev) =>
       prev.map((pr) =>
         (pr.user_id === userId || pr.user_id === validUserId) && pr.status === 'pending'
@@ -2201,9 +2454,16 @@ export function App() {
       )
     );
 
-    // Sync with Supabase
+    // 5. Authoritative Supabase Database Synchronization
     if (supabase) {
       try {
+        // Sync public.profiles.wallet_balance
+        await supabase
+          .from('profiles')
+          .update({ wallet_balance: newBalance })
+          .eq('id', validUserId);
+
+        // Sync wallets table
         await supabase
           .from('wallets')
           .upsert(
@@ -2211,6 +2471,7 @@ export function App() {
             { onConflict: 'user_id' }
           );
 
+        // Record payout log
         await supabase.from('payout_logs').insert([
           {
             id: validLogId,
@@ -2223,6 +2484,7 @@ export function App() {
           },
         ]);
 
+        // Complete pending requests
         await supabase
           .from('payout_requests')
           .update({ status: 'completed', completed_at: updatedTimestamp })
@@ -2232,11 +2494,41 @@ export function App() {
         console.warn('Supabase process payout sync:', err);
       }
     }
+
+    // 6. Record in-app notification & dispatch global toast
+    recordAppNotification(
+      validUserId,
+      '💸 Payout Sent by Admin',
+      `Payout of ₹${formatPrice(amount)} has been sent. Your updated wallet balance is ₹${formatPrice(newBalance)}.`,
+      'payout',
+      { amount, newBalance }
+    );
+    dispatchAppToast({
+      title: 'Payout Processed',
+      message: `₹${formatPrice(amount)} sent to ${userName || 'Partner'}. New Balance: ₹${formatPrice(newBalance)}.`,
+      type: 'success',
+    });
   };
 
   const handleUpdateWalletBalance = async (userId: string, newBalance: number) => {
     const updatedTimestamp = new Date().toISOString();
     const validUserId = ensureUuid(userId);
+
+    // 1. Update profiles state (Authoritative source)
+    setProfiles((prev) =>
+      prev.map((p) =>
+        p.id === userId || p.id === validUserId
+          ? { ...p, wallet_balance: newBalance }
+          : p
+      )
+    );
+
+    // Update currentUser if matching
+    if (currentUser && (currentUser.id === userId || currentUser.id === validUserId)) {
+      setCurrentUser((prev) => (prev ? { ...prev, wallet_balance: newBalance } : null));
+    }
+
+    // 2. Update wallets state
     setWallets((prev) => {
       const exists = prev.some((w) => w.user_id === userId || w.user_id === validUserId);
       if (exists) {
@@ -2257,8 +2549,14 @@ export function App() {
       ];
     });
 
+    // 3. Authoritative Supabase Database Synchronization targeting public.profiles.wallet_balance
     if (supabase) {
       try {
+        await supabase
+          .from('profiles')
+          .update({ wallet_balance: newBalance })
+          .eq('id', validUserId);
+
         await supabase
           .from('wallets')
           .upsert(
@@ -2269,6 +2567,20 @@ export function App() {
         console.warn('Supabase wallet update:', err);
       }
     }
+
+    // 4. Record in-app notification & dispatch global toast
+    recordAppNotification(
+      validUserId,
+      '💰 Wallet Balance Updated',
+      `Admin has updated your wallet balance to ₹${formatPrice(newBalance)}.`,
+      'wallet',
+      { newBalance }
+    );
+    dispatchAppToast({
+      title: 'Wallet Balance Updated',
+      message: `Wallet balance set to ₹${formatPrice(newBalance)}.`,
+      type: 'success',
+    });
   };
 
   const handleApprovePayout = async (id: string) => {
@@ -2281,11 +2593,29 @@ export function App() {
       const validUserId = ensureUuid(userId);
       const amount = Number(targetReq.amount) || 0;
 
-      // Deduct from wallet if needed
+      // Find current balance from profiles
+      const targetProfile = profiles.find((p) => p.id === userId || p.id === validUserId);
+      const currentBal = targetProfile && typeof targetProfile.wallet_balance === 'number'
+        ? Number(targetProfile.wallet_balance)
+        : (wallets.find((w) => w.user_id === userId || w.user_id === validUserId)?.balance || 0);
+
+      const newBal = Math.max(0, currentBal - amount);
+
+      // 1. Update profiles state
+      setProfiles((prev) =>
+        prev.map((p) =>
+          p.id === userId || p.id === validUserId
+            ? { ...p, wallet_balance: newBal }
+            : p
+        )
+      );
+
+      if (currentUser && (currentUser.id === userId || currentUser.id === validUserId)) {
+        setCurrentUser((prev) => (prev ? { ...prev, wallet_balance: newBal } : null));
+      }
+
+      // 2. Update wallets state
       setWallets((prev) => {
-        const currentWallet = prev.find((w) => w.user_id === userId || w.user_id === validUserId);
-        const currentBal = currentWallet ? Number(currentWallet.balance) || 0 : 0;
-        const newBal = Math.max(0, currentBal - amount);
         const exists = prev.some((w) => w.user_id === userId || w.user_id === validUserId);
         if (exists) {
           return prev.map((w) =>
@@ -2305,7 +2635,7 @@ export function App() {
         ];
       });
 
-      // Add payout log
+      // 3. Add payout log
       const newLog: PayoutLog = {
         id: generateUuid(),
         user_id: validUserId,
@@ -2320,11 +2650,14 @@ export function App() {
       };
       setPayoutLogs((prev) => [newLog, ...prev]);
 
+      // 4. Sync with Supabase (profiles.wallet_balance & wallets.balance)
       if (supabase) {
         try {
-          const currentWallet = wallets.find((w) => w.user_id === userId || w.user_id === validUserId);
-          const currentBal = currentWallet ? Number(currentWallet.balance) || 0 : 0;
-          const newBal = Math.max(0, currentBal - amount);
+          await supabase
+            .from('profiles')
+            .update({ wallet_balance: newBal })
+            .eq('id', validUserId);
+
           await supabase
             .from('wallets')
             .upsert(
@@ -2347,6 +2680,20 @@ export function App() {
           console.warn('Supabase approve payout balance update:', err);
         }
       }
+
+      // 5. Notify user
+      recordAppNotification(
+        validUserId,
+        '✅ Payout Request Approved',
+        `Your withdrawal request of ₹${formatPrice(amount)} has been approved and paid. Updated balance: ₹${formatPrice(newBal)}.`,
+        'payout',
+        { amount, newBal }
+      );
+      dispatchAppToast({
+        title: 'Payout Approved',
+        message: `Approved ₹${formatPrice(amount)} for ${targetReq.user_name || 'Partner'}.`,
+        type: 'success',
+      });
     }
 
     setPayoutRequests((prev) =>
@@ -2367,6 +2714,7 @@ export function App() {
   };
 
   const handleRejectPayout = async (id: string, reason?: string) => {
+    const targetReq = payoutRequests.find((p) => p.id === id);
     setPayoutRequests((prev) =>
       prev.map((p) =>
         p.id === id
@@ -2391,6 +2739,21 @@ export function App() {
         console.warn('Supabase update payout rejection:', err);
       }
     }
+
+    if (targetReq) {
+      recordAppNotification(
+        ensureUuid(targetReq.user_id),
+        '⚠️ Payout Request Rejected',
+        `Your withdrawal request of ₹${formatPrice(targetReq.amount)} was rejected. Reason: ${reason || 'Details could not be verified.'}`,
+        'payout',
+        { amount: targetReq.amount, reason }
+      );
+      dispatchAppToast({
+        title: 'Payout Request Rejected',
+        message: `Withdrawal request of ₹${formatPrice(targetReq.amount)} marked rejected.`,
+        type: 'warning',
+      });
+    }
   };
 
   const handleRequestPayout = async (payoutData: {
@@ -2401,6 +2764,20 @@ export function App() {
     ifsc_code?: string;
     user_role: string;
   }) => {
+    const currentWalletBalance = Number(currentUser?.wallet_balance) || 0;
+    const requestedAmount = Number(payoutData.amount);
+
+    // CRITICAL REQUIREMENT: STRICT "INSUFFICIENT BALANCE" WITHDRAWAL VALIDATION
+    if (requestedAmount > currentWalletBalance || currentWalletBalance <= 0) {
+      const errorText = 'Insufficient Balance! You cannot withdraw more than your available wallet amount.';
+      dispatchAppToast({
+        title: 'Withdrawal Failed',
+        message: errorText,
+        type: 'error',
+      });
+      throw new Error(errorText);
+    }
+
     const validPayoutId = generateUuid();
     const validUserId = ensureUuid(currentUser?.id);
 
@@ -2453,6 +2830,12 @@ export function App() {
         console.warn('Supabase insert payout request:', err);
       }
     }
+
+    dispatchAppToast({
+      title: 'Withdrawal Request Submitted',
+      message: `Your request for ₹${formatPrice(requestedAmount)} is sent for verification.`,
+      type: 'info',
+    });
   };
 
   const handleUpdatePermanentAddress = async (newAddress: string) => {
@@ -2750,7 +3133,7 @@ export function App() {
 
   const handleUpdateDeliveryOrderStatus = async (
     orderId: string,
-    newStatus: 'ready_for_pickup' | 'out_for_delivery' | 'delivered_by_boy' | 'delivered' | 'success' | string
+    newStatus: 'out_for_delivery' | 'delivered_by_boy' | 'delivered' | 'success'
   ) => {
     const isDriverMarked = newStatus === 'delivered_by_boy';
     const isCompleted = newStatus === 'success' || newStatus === 'delivered';
@@ -3076,6 +3459,7 @@ export function App() {
 
               {/* Exit to User Marketplace */}
               <div className="flex items-center gap-3">
+                <NotificationBell currentUser={currentUser} />
                 <button
                   onClick={() => navigateTo('user', 'marketplace')}
                   className="px-3.5 py-1.5 bg-slate-800 hover:bg-slate-700 text-slate-300 hover:text-white rounded-xl text-xs font-bold transition flex items-center gap-1.5 border border-slate-700"
@@ -3138,6 +3522,9 @@ export function App() {
           onModerate={handleUpdateListingStatus}
           isAdmin={true}
         />
+
+        {/* Global In-App Notifications Toast */}
+        <GlobalToastContainer />
       </div>
     );
   }
@@ -3343,6 +3730,9 @@ export function App() {
                   </span>
                 )}
               </button>
+
+              {/* Notification Bell Center */}
+              <NotificationBell currentUser={currentUser} />
 
               {currentUser ? (
                 <div className="hidden sm:flex items-center gap-2 pl-3 border-l border-slate-200">
@@ -3792,8 +4182,8 @@ export function App() {
             userPhone={currentUser.phone}
             userName={currentUser.full_name}
             userId={currentUser.id}
-            userEmail={currentUser.email}
-            isProUser={currentUser.is_pro || currentUser.plan_status === 'active'}
+            isProUser={isUserPlanActive(currentUser)}
+            currentUser={currentUser}
           />
         )}
 
@@ -3854,7 +4244,6 @@ export function App() {
             onDeleteListing={handleDeleteListing}
             onToggleListingStatus={handleToggleListingStatus}
             onRequestPayout={handleRequestPayout}
-            onUpdateOrderStatus={handleUpdateDeliveryOrderStatus}
           />
         )}
 
@@ -4001,6 +4390,9 @@ export function App() {
         initialType={appPolicyModalType}
         onClose={() => setAppPolicyModalOpen(false)}
       />
+
+      {/* Global In-App Notifications Toast */}
+      <GlobalToastContainer />
     </div>
   );
 }

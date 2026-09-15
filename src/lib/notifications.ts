@@ -8,6 +8,31 @@
  */
 
 import { supabase, getEnvVar } from './supabase';
+import { AppNotification } from '../types';
+
+export interface AppToastPayload {
+  title: string;
+  message: string;
+  type?: 'success' | 'error' | 'info' | 'warning' | 'wallet' | 'payout';
+  duration?: number;
+}
+
+/**
+ * Dispatches a real-time reactive toast alert to the global viewport
+ */
+export function dispatchAppToast(toast: AppToastPayload) {
+  if (typeof window !== 'undefined') {
+    window.dispatchEvent(
+      new CustomEvent('mlb_app_toast', {
+        detail: {
+          id: `toast_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`,
+          ...toast,
+          duration: toast.duration || 5000,
+        },
+      })
+    );
+  }
+}
 
 // WebintoApp Configuration
 const WEBINTOAPP_API_URL = 'https://www.webintoapp.com/api/v2/push/send';
@@ -276,3 +301,145 @@ export async function checkAndSend3DaysPlanExpiryAlerts(): Promise<{
     };
   }
 }
+
+/**
+ * FEATURE 3: Database & Local Synchronized Notification Logger
+ * Stores notification in Supabase 'notifications' table (with fallback to localStorage),
+ * triggers WebintoApp push notifications, and emits local real-time reactive event.
+ */
+export async function recordAppNotification(
+  userId?: string,
+  title: string = 'New Alert',
+  message: string = '',
+  type: 'wallet' | 'payout' | 'order' | 'plan' | 'alert' | 'general' = 'general',
+  extraData: Record<string, any> = {}
+): Promise<AppNotification> {
+  const newNotification: AppNotification = {
+    id: `notif_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`,
+    user_id: userId,
+    title,
+    message,
+    type,
+    data: extraData,
+    is_read: false,
+    created_at: new Date().toISOString(),
+  };
+
+  // 1. Trigger global interactive toast alert immediately
+  dispatchAppToast({
+    title,
+    message,
+    type: type === 'wallet' ? 'wallet' : type === 'payout' ? 'payout' : 'info',
+  });
+
+  // 2. Persist in Local Storage for instant offline-safe access
+  try {
+    const storageKey = 'mlb_app_notifications';
+    const raw = localStorage.getItem(storageKey);
+    const list: AppNotification[] = raw ? JSON.parse(raw) : [];
+    list.unshift(newNotification);
+    localStorage.setItem(storageKey, JSON.stringify(list.slice(0, 100)));
+  } catch (_) {}
+
+  // 3. Emit Window event for reactive UI components
+  if (typeof window !== 'undefined') {
+    window.dispatchEvent(
+      new CustomEvent('mlb_new_notification', { detail: newNotification })
+    );
+  }
+
+  // 4. Send WebintoApp push notification
+  try {
+    sendPushNotification(userId, title, message, extraData);
+  } catch (_) {}
+
+  // 5. Attempt database sync in Supabase
+  if (supabase) {
+    try {
+      await supabase.from('notifications').insert([
+        {
+          id: newNotification.id,
+          user_id: userId,
+          title,
+          message,
+          type,
+          data: extraData,
+          is_read: false,
+          created_at: newNotification.created_at,
+        },
+      ]);
+    } catch (dbErr) {
+      console.warn('[Notification DB sync note] Notifications table insert fallback:', dbErr);
+    }
+  }
+
+  return newNotification;
+}
+
+/**
+ * Fetches user notifications from Supabase and merges with local persistence
+ */
+export async function fetchUserNotifications(userId?: string): Promise<AppNotification[]> {
+  let dbList: AppNotification[] = [];
+
+  if (supabase && userId) {
+    try {
+      const { data, error } = await supabase
+        .from('notifications')
+        .select('*')
+        .or(`user_id.eq.${userId},user_id.is.null`)
+        .order('created_at', { ascending: false })
+        .limit(40);
+
+      if (!error && data) {
+        dbList = data as AppNotification[];
+      }
+    } catch (_) {}
+  }
+
+  // Fallback / merge with localStorage
+  try {
+    const raw = localStorage.getItem('mlb_app_notifications');
+    const localList: AppNotification[] = raw ? JSON.parse(raw) : [];
+    const mergedMap = new Map<string, AppNotification>();
+    
+    [...dbList, ...localList].forEach((item) => {
+      if (!item.user_id || item.user_id === userId) {
+        if (!mergedMap.has(item.id)) {
+          mergedMap.set(item.id, item);
+        }
+      }
+    });
+
+    return Array.from(mergedMap.values()).sort(
+      (a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime()
+    );
+  } catch (_) {
+    return dbList;
+  }
+}
+
+/**
+ * Marks notification as read in database and local cache
+ */
+export async function markNotificationAsRead(id: string): Promise<void> {
+  try {
+    const raw = localStorage.getItem('mlb_app_notifications');
+    if (raw) {
+      const list: AppNotification[] = JSON.parse(raw);
+      const updated = list.map((n) => (n.id === id ? { ...n, is_read: true } : n));
+      localStorage.setItem('mlb_app_notifications', JSON.stringify(updated));
+    }
+  } catch (_) {}
+
+  if (supabase) {
+    try {
+      await supabase.from('notifications').update({ is_read: true }).eq('id', id);
+    } catch (_) {}
+  }
+
+  if (typeof window !== 'undefined') {
+    window.dispatchEvent(new CustomEvent('mlb_notification_read', { detail: { id } }));
+  }
+}
+

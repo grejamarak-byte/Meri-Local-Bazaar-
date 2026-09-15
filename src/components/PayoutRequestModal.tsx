@@ -12,6 +12,7 @@ import {
   ShieldCheck,
 } from 'lucide-react';
 import { UserProfile, formatPrice } from '../types';
+import { dispatchAppToast } from '../lib/notifications';
 
 interface PayoutRequestModalProps {
   isOpen: boolean;
@@ -60,6 +61,21 @@ export const PayoutRequestModal: React.FC<PayoutRequestModalProps> = ({
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setErrorMsg(null);
+
+    const currentWalletBalance = Number(availableBalance) || 0;
+    const requestedAmount = Number(amount);
+
+    // CRITICAL REQUIREMENT: STRICT "INSUFFICIENT BALANCE" WITHDRAWAL VALIDATION
+    if (requestedAmount > currentWalletBalance || currentWalletBalance <= 0) {
+      const errorText = 'Insufficient Balance! You cannot withdraw more than your available wallet amount.';
+      setErrorMsg(errorText);
+      dispatchAppToast({
+        title: 'Withdrawal Failed',
+        message: errorText,
+        type: 'error',
+      });
+      return;
+    }
 
     if (amount <= 0) {
       setErrorMsg('Please enter a valid payout withdrawal amount (Min: ₹100).');

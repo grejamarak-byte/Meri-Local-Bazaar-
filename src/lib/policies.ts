@@ -37,19 +37,19 @@ export const DEFAULT_TERMS_CONDITIONS = `
 
 ---
 
-### 4. Buyer Responsibilities & Permanent Address
-4.1. Buyers must provide accurate contact details, including a valid 10-digit WhatsApp/calling phone number and complete permanent delivery address.  
-4.2. Buyers must inspect packages upon arrival and confirm delivery through the app to complete the transaction.
+### 4. Buyer Responsibilities & Mandatory Inspection at Time of Delivery
+4.1. **Accuracy of Information:** Buyers must provide accurate contact details, including a valid 10-digit WhatsApp/calling phone number and complete permanent delivery address.  
+4.2. **Mandatory Delivery Inspection on Handover:**  
+   - **Thorough Inspection Required:** The buyer **must thoroughly check and inspect the product's expiry date, packaging integrity, manufacturer seal, and related quality parameters at the exact time of delivery** in the presence of the delivery personnel before confirming acceptance.  
+   - **Immediate Rejection on Defects:** If the product is past its expiry date, damaged, or unsealed, the buyer must immediately refuse acceptance at the doorstep.  
+4.3. **Strict Finality of Delivery Confirmation & Zero Post-Acceptance Liability:**  
+   - **No Help / No Refund Post-Confirmation:** **ONCE THE DELIVERY IS CONFIRMED OR ACCEPTED BY THE BUYER (WHETHER BY CLICKING "CONFIRM DELIVERY SUCCESS", PROVIDING CONFIRMATION TO THE RIDER, OR ACCEPTING HANDOVER), NO SUBSEQUENT COMPLAINTS, CLAIMS, RETURN REQUESTS, OR REFUND REQUESTS REGARDING PRODUCT EXPIRY, CONDITION, OR PACKAGING WILL BE ENTERTAINED UNDER ANY CIRCUMSTANCES.**  
+   - **No Customer Support Redressal After Acceptance:** **ABSOLUTELY NO ASSISTANCE, ESCALATION, REPLACEMENT, OR HELP WILL BE PROVIDED AFTER DELIVERY IS CONFIRMED.** The buyer assumes full responsibility for inspecting all expiry dates and item conditions at the doorstep prior to confirming.
 
 ---
 
 ### 5. Dispute Resolution
-For any dispute, missing item, or seller grievance, users can contact the Meri Local Bazaar Admin Support via WhatsApp or official email.
-
----
-
-### 6. Mandatory Inspection & Delivery Release Notice
-**IMPORTANT NOTICE TO ALL BUYERS:** Every buyer must thoroughly inspect the ordered product, its physical condition, and the expiry date BEFORE confirming the delivery. Once you confirm the delivery, the payment is released, and the platform will not be able to offer any refunds, support, or help under any circumstances.
+For any dispute, missing item, or seller grievance, users can contact the Meri Local Bazaar Admin Support via WhatsApp or official email prior to delivery finalization.
 `;
 
 export const DEFAULT_PRIVACY_POLICY = `
@@ -66,7 +66,7 @@ To provide a secure and reliable local marketplace experience, we collect:
 1.2. **Buyer Delivery Information:** Permanent Delivery Address, landmark notes, and geolocation data for accurate doorstep parcel delivery.  
 1.3. **Seller & Merchant Data:** Shop name, market location, trade categories, contact details, and payout UPI ID.  
 1.4. **Driver & Service Partner Data:** Driving license, vehicle registration, service skills, and personal payout UPI ID.  
-1.5. **Transaction Records:** Order transaction UTR numbers, payment receipts, and consent timestamps.
+1.5. **Transaction & Verification Records:** Order transaction UTR numbers, payment receipts, delivery inspection timestamps, and digital acceptance confirmation logs.
 
 ---
 
@@ -74,7 +74,8 @@ To provide a secure and reliable local marketplace experience, we collect:
 2.1. **Order Fulfillment:** Sharing the buyer's delivery address and phone number exclusively with the assigned delivery partner to fulfill the shipment.  
 2.2. **Direct Payments:** Enabling customers to pay drivers and service providers directly to their personal UPI IDs without intermediary retention.  
 2.3. **Escrow & Security:** Verifying prepaid bank transaction UTR numbers against official escrow receipts.  
-2.4. **Autofill Convenience:** Storing permanent delivery addresses securely so buyers do not need to re-type address fields during checkout.
+2.4. **Autofill Convenience:** Storing permanent delivery addresses securely so buyers do not need to re-type address fields during checkout.  
+2.5. **Delivery Acceptance Logging:** We record the exact digital timestamp and verification log when the buyer confirms delivery. This immutable record serves as conclusive legal evidence that the buyer inspected and accepted the product's expiry date and quality parameters at the doorstep.
 
 ---
 
@@ -85,13 +86,19 @@ To provide a secure and reliable local marketplace experience, we collect:
 
 ---
 
-### 4. User Consent & Policy Updates
-4.1. By registering an account or ticking the checkout agreement checkbox, you consent to this Privacy Policy and the processing of your data as described.  
-4.2. We may update this Privacy Policy periodically. The latest version is always available within the application from the \`app_policies\` database record.
+### 4. Mandatory Delivery Inspection Legal Policy Clause
+4.1. In accordance with the Terms & Conditions, the buyer acknowledges and agrees that all products must be inspected for expiry dates and physical packaging integrity at the time of delivery.  
+4.2. Once digital or physical confirmation is logged, the platform does not process post-delivery expiry complaints, and no support or refund tickets will be entertained thereafter.
 
 ---
 
-### 5. Contacting Privacy Support
+### 5. User Consent & Policy Updates
+5.1. By registering an account or ticking the checkout agreement checkbox, you consent to this Privacy Policy and the processing of your data as described.  
+5.2. We may update this Privacy Policy periodically. The latest version is always available within the application from the \`app_policies\` database record.
+
+---
+
+### 6. Contacting Privacy Support
 If you have questions regarding your stored personal data or wish to request data deletion, contact support at \`support@merilocalbazaar.com\` or via the in-app Admin Help channel.
 `;
 

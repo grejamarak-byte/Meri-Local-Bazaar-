@@ -142,17 +142,31 @@ export const PolicyModal: React.FC<PolicyModalProps> = ({
           </button>
         </div>
 
-        {/* Highlight Callout Box: Out for Delivery Rule */}
+        {/* Highlight Callout Box: Out for Delivery Rule & Mandatory Delivery Inspection */}
         {activeTab === 'terms_conditions' && (
-          <div className="mx-4 sm:mx-6 mt-4 p-3.5 bg-amber-50 border border-amber-200 rounded-2xl flex items-start gap-3 shrink-0">
-            <AlertTriangle className="w-5 h-5 text-amber-600 shrink-0 mt-0.5" />
-            <div className="text-xs text-amber-950 space-y-1">
-              <div className="font-black text-amber-900">
-                Important: Out for Delivery Cancellation Policy
+          <div className="mx-4 sm:mx-6 mt-4 space-y-2.5 shrink-0">
+            <div className="p-3.5 bg-rose-50 border-2 border-rose-300 rounded-2xl flex items-start gap-3">
+              <AlertTriangle className="w-5 h-5 text-rose-600 shrink-0 mt-0.5" />
+              <div className="text-xs text-rose-950 space-y-1">
+                <div className="font-black text-rose-900 uppercase tracking-wide">
+                  Strict Legal Clause: Mandatory Expiry & Packaging Inspection on Handover
+                </div>
+                <p className="text-rose-800 leading-relaxed font-medium">
+                  Buyer must thoroughly check the product's <strong>expiry date, packaging integrity, and condition</strong> at the exact time of delivery before confirming. <strong>Once delivery is confirmed/accepted, no subsequent complaints, refunds, or support requests regarding product expiry or condition will be entertained, and no help will be provided after that point.</strong>
+                </p>
               </div>
-              <p className="text-amber-800 leading-relaxed">
-                Prepaid product order "Out for Delivery" hone ke baad cancel karne par <strong>Delivery Charges ka refund nahi milta</strong> (Delivery Charge Refund = ₹0). Product amount return policy ke hisab se refundable hai.
-              </p>
+            </div>
+
+            <div className="p-3 bg-amber-50 border border-amber-200 rounded-2xl flex items-start gap-3">
+              <AlertTriangle className="w-4 h-4 text-amber-600 shrink-0 mt-0.5" />
+              <div className="text-xs text-amber-950 space-y-0.5">
+                <div className="font-bold text-amber-900">
+                  Out for Delivery Cancellation Rule
+                </div>
+                <p className="text-amber-800 leading-relaxed">
+                  Prepaid order "Out for Delivery" hone ke baad cancel karne par <strong>Delivery Charges ka refund ₹0 hoga</strong>.
+                </p>
+              </div>
             </div>
           </div>
         )}

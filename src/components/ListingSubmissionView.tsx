@@ -1,4 +1,4 @@
-import React, { useState, useRef, useEffect } from 'react';
+import React, { useState, useRef, useEffect, useMemo } from 'react';
 import {
   UploadCloud,
   Image as ImageIcon,
@@ -14,19 +14,14 @@ import {
   Sparkles,
   MapPin,
   Loader2,
-  RefreshCw,
-  Store,
-  Car,
-  Briefcase,
-  Users,
 } from 'lucide-react';
-import { supabase, checkUserPlanStatusDirect } from '../lib/supabase';
+import { supabase } from '../lib/supabase';
 import {
   uploadListingImageToStorage,
   dataURLtoBlob,
   LISTING_IMAGE_BUCKET,
 } from '../lib/storage';
-import { Listing, LocalAddressFields } from '../types';
+import { Listing, LocalAddressFields, UserProfile, isUserPlanActive, isMasterAdmin } from '../types';
 import { LocalAddressSelector, LocalAddressState } from './LocalAddressSelector';
 
 import { generateUuid, ensureUuid } from '../lib/uuid';
@@ -38,8 +33,8 @@ interface ListingSubmissionViewProps {
   userPhone?: string;
   userName?: string;
   userId?: string;
-  userEmail?: string;
   isProUser?: boolean;
+  currentUser?: UserProfile | null;
 }
 
 interface PhotoItem {
@@ -55,11 +50,10 @@ interface PhotoItem {
 const MAX_PHOTOS = 6;
 
 const CATEGORIES = [
-  'Sellers',
   'Shops',
+  'Local Jobs & Services',
   'Local Cab & Taxi',
   'Travelers & Tour',
-  'Local Jobs & Services',
   'Bike & Auto Rickshaw',
   'Mobiles & Gadgets',
   'Vehicles',
@@ -78,11 +72,102 @@ export const ListingSubmissionView: React.FC<ListingSubmissionViewProps> = ({
   userPhone = '9876543210',
   userName = 'Seller',
   userId = 'usr_seller',
-  userEmail = '',
   isProUser = false,
+  currentUser,
 }) => {
+  // Real-time live database plan verification
+  const [dbPlanVerified, setDbPlanVerified] = useState<boolean | null>(null);
+  const [isVerifyingPlan, setIsVerifyingPlan] = useState(false);
+
+  // Live database plan verification against profiles table
+  useEffect(() => {
+    let isMounted = true;
+    const effectiveUid = userId || currentUser?.id;
+    const effectiveEmail = currentUser?.email;
+
+    async function verifyPlanWithDb() {
+      if (!supabase) return;
+      if (!effectiveUid && !effectiveEmail) return;
+
+      try {
+        setIsVerifyingPlan(true);
+        let query = supabase
+          .from('profiles')
+          .select('id, email, is_pro, pro_status, plan_status, account_status, is_approved_by_admin');
+
+        if (effectiveUid) {
+          query = query.eq('id', effectiveUid);
+        } else if (effectiveEmail) {
+          query = query.ilike('email', effectiveEmail.trim());
+        }
+
+        const { data, error } = await query.maybeSingle();
+
+        if (isMounted && data) {
+          const isActive = Boolean(
+            (data.email && data.email.toLowerCase().trim() === 'silgrakmarak1309@gmail.com') ||
+            (typeof data.plan_status === 'string' &&
+              (data.plan_status.toLowerCase() === 'active' || data.plan_status.toLowerCase() === 'approved')) ||
+            (typeof data.pro_status === 'string' &&
+              (data.pro_status.toLowerCase() === 'active' || data.pro_status.toLowerCase() === 'approved')) ||
+            data.is_pro === true
+          );
+          setDbPlanVerified(isActive);
+        }
+      } catch (err) {
+        console.warn('Live monthly plan check notice:', err);
+      } finally {
+        if (isMounted) setIsVerifyingPlan(false);
+      }
+    }
+
+    verifyPlanWithDb();
+
+    // Subscribe to realtime changes on this user's profile so if admin activates plan, user is unblocked immediately
+    if (supabase && effectiveUid) {
+      const channel = supabase
+        .channel(`profile-plan-check-${effectiveUid}`)
+        .on(
+          'postgres_changes',
+          { event: 'UPDATE', schema: 'public', table: 'profiles', filter: `id=eq.${effectiveUid}` },
+          (payload: any) => {
+            const updated = payload.new;
+            if (updated && isMounted) {
+              const isActive = Boolean(
+                (updated.email && updated.email.toLowerCase().trim() === 'silgrakmarak1309@gmail.com') ||
+                (typeof updated.plan_status === 'string' &&
+                  (updated.plan_status.toLowerCase() === 'active' || updated.plan_status.toLowerCase() === 'approved')) ||
+                (typeof updated.pro_status === 'string' &&
+                  (updated.pro_status.toLowerCase() === 'active' || updated.pro_status.toLowerCase() === 'approved')) ||
+                updated.is_pro === true
+              );
+              setDbPlanVerified(isActive);
+            }
+          }
+        )
+        .subscribe();
+
+      return () => {
+        isMounted = false;
+        supabase.removeChannel(channel);
+      };
+    }
+
+    return () => {
+      isMounted = false;
+    };
+  }, [userId, currentUser?.id, currentUser?.email]);
+
+  // Unified active plan status for all listing categories:
+  // (Seller, Cab & Taxi, Travelers & Tour, Local Service provider, Shop owner, etc.)
+  const hasActiveMonthlyPlan = useMemo(() => {
+    if (isMasterAdmin(currentUser)) return true;
+    if (dbPlanVerified !== null) return dbPlanVerified;
+    if (currentUser) return isUserPlanActive(currentUser);
+    return Boolean(isProUser);
+  }, [currentUser, dbPlanVerified, isProUser]);
   const [title, setTitle] = useState('');
-  const [category, setCategory] = useState('Sellers');
+  const [category, setCategory] = useState('Mobiles & Gadgets');
   const [location, setLocation] = useState('Tura, Meghalaya');
   const [locationState, setLocationState] = useState<LocalAddressState>({
     state: 'Meghalaya',
@@ -91,7 +176,6 @@ export const ListingSubmissionView: React.FC<ListingSubmissionViewProps> = ({
     village: '',
   });
   const [price, setPrice] = useState('');
-  const [weight, setWeight] = useState('');
   const [condition, setCondition] = useState('Used - Like New');
   const [description, setDescription] = useState('');
   const [phone, setPhone] = useState(userPhone);
@@ -102,70 +186,7 @@ export const ListingSubmissionView: React.FC<ListingSubmissionViewProps> = ({
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  // STRICT SUPABASE DIRECT DATABASE PLAN CHECK STATE:
-  const [isCheckingDb, setIsCheckingDb] = useState<boolean>(!isProUser);
-  const [livePlanStatus, setLivePlanStatus] = useState<string>(isProUser ? 'active' : 'checking');
-  const [isLiveActive, setIsLiveActive] = useState<boolean>(Boolean(isProUser));
-  const [showProModal, setShowProModal] = useState<boolean>(false);
-  const [livePlanExpiry, setLivePlanExpiry] = useState<string | null>(null);
-
   const fileInputRef = useRef<HTMLInputElement>(null);
-
-  // Direct Supabase query against profiles table to bypass all session cache and local state delays
-  const verifyPlanDirectFromSupabase = async (triggerModalOnInactive = false): Promise<boolean> => {
-    setIsCheckingDb(true);
-    try {
-      const res = await checkUserPlanStatusDirect({
-        userId,
-        email: userEmail,
-        phone: userPhone,
-      });
-
-      const active = Boolean(
-        res.isActive ||
-        res.planStatus === 'active' ||
-        res.isPro === true ||
-        res.profile?.plan_status === 'active' ||
-        res.profile?.pro_status === 'active' ||
-        res.profile?.is_pro === true ||
-        res.profile?.is_approved_by_admin === true ||
-        isProUser === true
-      );
-
-      setIsLiveActive(active);
-      setLivePlanStatus(active ? 'active' : res.planStatus || 'inactive');
-
-      if (res.profile?.plan_expiry_date || res.profile?.pro_expiry) {
-        setLivePlanExpiry(res.profile.plan_expiry_date || res.profile.pro_expiry);
-      }
-
-      if (!active) {
-        if (triggerModalOnInactive) {
-          setShowProModal(true);
-        }
-        return false;
-      } else {
-        setShowProModal(false);
-        return true;
-      }
-    } catch (err) {
-      console.warn('Direct database plan check failed, fallback to prop:', err);
-      const fallback = Boolean(isProUser);
-      setIsLiveActive(fallback);
-      setLivePlanStatus(fallback ? 'active' : 'inactive');
-      if (!fallback && triggerModalOnInactive) {
-        setShowProModal(true);
-      }
-      return fallback;
-    } finally {
-      setIsCheckingDb(false);
-    }
-  };
-
-  // Check live status on mount (do not show modal if user is already pro/active)
-  useEffect(() => {
-    verifyPlanDirectFromSupabase(!isProUser);
-  }, [userId, userEmail, userPhone, isProUser]);
 
   const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const files = e.target.files;
@@ -280,30 +301,23 @@ export const ListingSubmissionView: React.FC<ListingSubmissionViewProps> = ({
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
 
-    // STRICT SUPABASE DATABASE VALIDATION GUARD:
-    // Execute a direct check against the Supabase database before allowing a post.
-    // If the logged-in user's monthly plan status is NOT active (i.e. plan_status !== 'active'),
-    // block the submission immediately and pop up the "Posting Restricted! PRO Membership Required" modal screen.
-    setSubmitting(true);
-    setError(null);
-
-    const isVerifiedActive = await verifyPlanDirectFromSupabase(true);
-    if (!isVerifiedActive) {
-      setSubmitting(false);
-      setShowProModal(true);
+    // UNIFIED ACTIVE PLAN RESTRICTION FOR ALL CATEGORIES:
+    // (Sellers, Cab & Taxi, Travelers & Tour, Local Services, Shop owners, etc.)
+    // Only users with an active monthly subscription plan (plan_status === 'active' or is_pro === true) can post.
+    if (!hasActiveMonthlyPlan) {
       setError(
-        'Posting Restricted! PRO Membership Required. Your monthly plan status is currently inactive in the database. Please activate your monthly plan to post listings.'
+        'Posting Restricted! Free users can only act as Buyers to browse and purchase items. Please upgrade to a PRO Plan to post listings.'
       );
       return;
     }
 
-    // IF ACTIVE: Bypass all restrictions and allow unlimited listing posts for categories like
-    // Sellers, Cab & Taxi, Travelers, Local Service & Job, and Shops.
     if (!title.trim() || !price || parseFloat(price) <= 0) {
       setError('Please provide a valid listing title and price.');
-      setSubmitting(false);
       return;
     }
+
+    setSubmitting(true);
+    setError(null);
 
     // Upload any pending or un-uploaded photos directly to Supabase Storage bucket "Listing image"
     const uploadedPublicUrls: string[] = [];
@@ -360,9 +374,6 @@ export const ListingSubmissionView: React.FC<ListingSubmissionViewProps> = ({
     const finalListingId = generateUuid();
     const finalSellerId = ensureUuid(userId);
 
-    const numericWeightMatch = weight.match(/[0-9]+(?:\.[0-9]+)?/);
-    const parsedWeightKg = numericWeightMatch ? parseFloat(numericWeightMatch[0]) : 0.5;
-
     const listingPayload: Listing = {
       id: finalListingId,
       title: title.trim(),
@@ -373,16 +384,14 @@ export const ListingSubmissionView: React.FC<ListingSubmissionViewProps> = ({
       block: locationState.block,
       village: locationState.village,
       price: parseFloat(price),
-      weight: weight.trim() || `${parsedWeightKg} kg`,
-      weight_kg: parsedWeightKg > 0 ? parsedWeightKg : 0.5,
       condition,
       description: description.trim(),
       phone: phone.trim(),
       whatsapp: whatsapp.trim() || phone.trim(),
       images_json: finalImagesJson,
       image_urls: finalImageUrls,
-      is_featured: true,
-      is_pro: true,
+      is_featured: isProUser,
+      is_pro: isProUser,
       status: 'pending', // Strict moderation requirement
       seller_id: finalSellerId,
       seller_name: userName,
@@ -410,106 +419,59 @@ export const ListingSubmissionView: React.FC<ListingSubmissionViewProps> = ({
 
   const activePhoto = photos[activePhotoIndex] || photos[0];
 
-  const shouldBlockPosting = !isCheckingDb && (!isLiveActive || showProModal);
-
   return (
     <div className="max-w-2xl mx-auto bg-white rounded-3xl shadow-sm border border-slate-200 overflow-hidden relative">
-      {/* POSTING RESTRICTED! PRO MEMBERSHIP REQUIRED - MODAL SCREEN */}
-      {shouldBlockPosting && (
-        <div className="absolute inset-0 z-40 bg-slate-950/90 backdrop-blur-md rounded-3xl flex flex-col items-center justify-center p-4 sm:p-6 text-center animate-in fade-in duration-200">
-          <div className="max-w-md w-full bg-slate-900 border-2 border-amber-500/70 rounded-3xl p-6 sm:p-8 shadow-2xl text-white relative overflow-hidden space-y-5">
-            <div className="w-16 h-16 rounded-2xl bg-gradient-to-tr from-amber-500 to-orange-600 text-slate-950 flex items-center justify-center mx-auto shadow-xl shadow-amber-500/30">
+      {/* UNIFIED MONTHLY PLAN RESTRICTION OVERLAY FOR ALL CATEGORIES */}
+      {!hasActiveMonthlyPlan && (
+        <div className="absolute inset-0 z-30 bg-slate-950/85 backdrop-blur-md rounded-3xl flex flex-col items-center justify-center p-6 text-center animate-in fade-in duration-200">
+          <div className="max-w-md w-full bg-slate-900 border-2 border-amber-500/60 rounded-3xl p-6 sm:p-8 shadow-2xl text-white relative overflow-hidden space-y-5">
+            <div className="w-16 h-16 rounded-2xl bg-gradient-to-tr from-amber-500 to-orange-600 text-slate-950 flex items-center justify-center mx-auto shadow-lg shadow-amber-500/30">
               <Lock className="w-8 h-8 text-slate-950" />
             </div>
 
             <div className="space-y-2">
-              <div className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-amber-500/20 border border-amber-500/50 text-amber-300 text-[11px] font-black uppercase tracking-wider">
+              <div className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-amber-500/20 border border-amber-500/40 text-amber-300 text-[11px] font-black uppercase tracking-wider">
                 <Sparkles className="w-3.5 h-3.5 fill-amber-400" /> PRO Membership Required
               </div>
               <h3 className="text-xl sm:text-2xl font-black text-white tracking-tight">
-                Posting Restricted! PRO Membership Required
+                Posting Restricted!
               </h3>
               <p className="text-xs sm:text-sm text-slate-300 leading-relaxed font-medium">
-                Your monthly plan status is currently <span className="text-red-400 font-bold uppercase">{livePlanStatus}</span>. Direct database verification requires an active monthly plan (<code className="bg-slate-800 px-1 py-0.5 rounded text-amber-300">plan_status = 'active'</code>) to publish listings.
+                Posting Restricted! Free users can only act as Buyers to browse and purchase items. Please upgrade to a PRO Plan to post listings.
               </p>
             </div>
 
-            {/* UNLIMITED CATEGORIES UNLOCKED WHEN ACTIVE */}
-            <div className="bg-slate-950/80 border border-slate-800 rounded-2xl p-4 text-left text-xs space-y-2.5 text-slate-300">
-              <div className="text-[11px] font-bold text-slate-400 uppercase tracking-wider mb-1">
-                Active Monthly Plan Unlocks Unlimited Posts For:
+            <div className="bg-slate-950/70 border border-slate-800 rounded-2xl p-3.5 text-left text-xs space-y-2 text-slate-300">
+              <div className="flex items-center gap-2 text-amber-400 font-bold">
+                <CheckCircle2 className="w-4 h-4 text-amber-400 shrink-0" />
+                <span>Post unlimited ads with verified seller badge</span>
               </div>
-              <div className="grid grid-cols-2 gap-2 text-[11px]">
-                <div className="flex items-center gap-1.5 text-amber-300 font-bold">
-                  <CheckCircle2 className="w-3.5 h-3.5 text-amber-400 shrink-0" />
-                  <span>Sellers & Products</span>
-                </div>
-                <div className="flex items-center gap-1.5 text-amber-300 font-bold">
-                  <CheckCircle2 className="w-3.5 h-3.5 text-amber-400 shrink-0" />
-                  <span>Shops & Outlets</span>
-                </div>
-                <div className="flex items-center gap-1.5 text-amber-300 font-bold">
-                  <CheckCircle2 className="w-3.5 h-3.5 text-amber-400 shrink-0" />
-                  <span>Cab & Taxi Services</span>
-                </div>
-                <div className="flex items-center gap-1.5 text-amber-300 font-bold">
-                  <CheckCircle2 className="w-3.5 h-3.5 text-amber-400 shrink-0" />
-                  <span>Travelers & Tours</span>
-                </div>
-                <div className="flex items-center gap-1.5 text-amber-300 font-bold col-span-2">
-                  <CheckCircle2 className="w-3.5 h-3.5 text-amber-400 shrink-0" />
-                  <span>Local Service & Job Providers</span>
-                </div>
+              <div className="flex items-center gap-2 text-emerald-400 font-bold">
+                <CheckCircle2 className="w-4 h-4 text-emerald-400 shrink-0" />
+                <span>Direct WhatsApp inquiries & top marketplace ranking</span>
               </div>
             </div>
 
-            {/* ACTION BUTTONS */}
-            <div className="pt-2 flex flex-col gap-2.5">
+            <div className="pt-2 flex flex-col sm:flex-row items-center justify-center gap-3">
               {onNavigateToPro && (
                 <button
                   type="button"
                   onClick={onNavigateToPro}
-                  className="w-full px-6 py-3.5 bg-gradient-to-r from-amber-400 via-amber-500 to-orange-500 hover:from-amber-300 hover:to-orange-400 text-slate-950 font-black text-xs sm:text-sm rounded-xl shadow-lg shadow-amber-500/20 transition flex items-center justify-center gap-2 cursor-pointer active:scale-98"
+                  className="w-full sm:w-auto px-6 py-3 bg-gradient-to-r from-amber-400 to-amber-500 hover:from-amber-300 hover:to-amber-400 text-slate-950 font-black text-xs sm:text-sm rounded-xl shadow-lg shadow-amber-500/20 transition flex items-center justify-center gap-2 cursor-pointer"
                 >
                   <Sparkles className="w-4 h-4 fill-slate-950" />
-                  Upgrade to Monthly Plan
+                  View PRO Plans
                 </button>
               )}
-
-              <button
-                type="button"
-                onClick={() => verifyPlanDirectFromSupabase(true)}
-                disabled={isCheckingDb}
-                className="w-full px-4 py-2.5 bg-slate-800 hover:bg-slate-700 disabled:opacity-60 text-amber-400 font-bold text-xs rounded-xl border border-amber-500/30 transition flex items-center justify-center gap-2 cursor-pointer"
-              >
-                <RefreshCw className={`w-3.5 h-3.5 ${isCheckingDb ? 'animate-spin' : ''}`} />
-                {isCheckingDb ? 'Checking Database...' : 'Re-verify Live Status in Database'}
-              </button>
-
               <button
                 type="button"
                 onClick={onCancel}
-                className="w-full px-5 py-2.5 bg-transparent hover:bg-slate-800/60 text-slate-400 hover:text-white font-bold text-xs rounded-xl transition cursor-pointer"
+                className="w-full sm:w-auto px-5 py-3 bg-slate-800 hover:bg-slate-700 text-slate-300 font-bold text-xs sm:text-sm rounded-xl transition cursor-pointer"
               >
                 Back to Marketplace
               </button>
             </div>
           </div>
-        </div>
-      )}
-
-      {/* ACTIVE PLAN BADGE BANNER */}
-      {isLiveActive && (
-        <div className="bg-emerald-600 text-white px-6 py-2.5 flex items-center justify-between text-xs font-bold">
-          <div className="flex items-center gap-2">
-            <CheckCircle2 className="w-4 h-4 text-emerald-200" />
-            <span>Monthly Plan Active — Unlimited Listing Posts Unlocked</span>
-          </div>
-          {livePlanExpiry && (
-            <span className="text-[10px] bg-emerald-700 px-2 py-0.5 rounded text-emerald-100 font-medium">
-              Valid until: {new Date(livePlanExpiry).toLocaleDateString()}
-            </span>
-          )}
         </div>
       )}
 
@@ -749,19 +711,6 @@ export const ListingSubmissionView: React.FC<ListingSubmissionViewProps> = ({
               placeholder="e.g. 145000"
               value={price}
               onChange={(e) => setPrice(e.target.value)}
-              className="w-full px-4 py-2.5 rounded-xl border border-slate-300 bg-white text-slate-900 font-bold placeholder:text-slate-400 placeholder:font-normal text-sm focus:ring-2 focus:ring-orange-500/20 focus:border-orange-500 focus:outline-none"
-            />
-          </div>
-
-          <div>
-            <label className="block text-xs font-bold text-slate-800 uppercase tracking-wider mb-1.5">
-              Weight
-            </label>
-            <input
-              type="text"
-              placeholder="e.g. 0.5 kg, 1 kg"
-              value={weight}
-              onChange={(e) => setWeight(e.target.value)}
               className="w-full px-4 py-2.5 rounded-xl border border-slate-300 bg-white text-slate-900 font-bold placeholder:text-slate-400 placeholder:font-normal text-sm focus:ring-2 focus:ring-orange-500/20 focus:border-orange-500 focus:outline-none"
             />
           </div>

@@ -57,7 +57,7 @@ const CATEGORIES = [
 ];
 
 export const UserMarketplace: React.FC<UserMarketplaceProps> = ({
-  listings = [],
+  listings,
   banners = [],
   onViewListing,
   onOpenSubmit,
@@ -69,8 +69,7 @@ export const UserMarketplace: React.FC<UserMarketplaceProps> = ({
   const [selectedCategory, setSelectedCategory] = useState('All');
 
   // Filter to show active listings (and pending only if by current user)
-  const activeListings = (listings || []).filter((item) => {
-    if (!item) return false;
+  const activeListings = listings.filter((item) => {
     const isVisible = item.status === 'active' || item.status === 'pending';
     if (!isVisible) return false;
 
@@ -107,7 +106,7 @@ export const UserMarketplace: React.FC<UserMarketplaceProps> = ({
           <span className="hidden sm:inline">Explore:</span>
         </div>
         <div className="flex items-center gap-1.5 sm:gap-2">
-          {CATEGORIES?.map((cat) => (
+          {CATEGORIES.map((cat) => (
             <button
               key={cat}
               onClick={() => setSelectedCategory(cat)}
@@ -174,8 +173,7 @@ export const UserMarketplace: React.FC<UserMarketplaceProps> = ({
           </div>
         ) : (
           <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-2.5 sm:gap-4">
-            {activeListings?.map((item) => {
-              if (!item) return null;
+            {activeListings.map((item) => {
               return (
                 <div
                   key={item.id}

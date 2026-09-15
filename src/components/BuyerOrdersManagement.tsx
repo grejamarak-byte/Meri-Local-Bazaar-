@@ -101,6 +101,11 @@ export const BuyerOrdersManagement: React.FC<BuyerOrdersManagementProps> = ({
   });
 
   const handleConfirmClick = async (order: DeliveryOrder) => {
+    const verified = window.confirm(
+      `IMPORTANT DELIVERY VERIFICATION:\n\nHave you thoroughly inspected the product's EXPIRY DATE, packaging integrity, and condition in front of the delivery partner?\n\nAs per Terms & Conditions, once you confirm delivery, NO SUBSEQUENT COMPLAINTS, REFUNDS, OR SUPPORT REQUESTS REGARDING PRODUCT EXPIRY OR CONDITION WILL BE ENTERTAINED, AND NO HELP WILL BE PROVIDED AFTER THAT POINT.\n\nClick OK if you have verified the product condition and expiry date.`
+    );
+    if (!verified) return;
+
     try {
       setConfirmingId(order.id);
       await onConfirmDeliverySuccess(order.id);
@@ -533,17 +538,17 @@ export const BuyerOrdersManagement: React.FC<BuyerOrdersManagementProps> = ({
                         Package Delivered at Your Location!
                       </div>
                       <p className="text-xs text-slate-700">
-                        Delivery Rider <strong>{order.delivery_partner_name || 'Driver'}</strong> has marked your shipment as delivered. Please verify you have received the items in good condition, then click the button below to confirm.
+                        Delivery Rider <strong>{order.delivery_partner_name || 'Driver'}</strong> has arrived with your package.
                       </p>
 
-                      {/* MANDATORY BUYER INSPECTION & DELIVERY RELEASE NOTICE */}
-                      <div className="p-3 bg-amber-50 border border-amber-300 rounded-xl text-xs text-amber-950 space-y-1">
-                        <div className="font-black text-amber-900 flex items-center gap-1.5 text-[11px] uppercase tracking-wide">
-                          <AlertCircle className="w-3.5 h-3.5 text-amber-600 shrink-0" />
-                          <span>IMPORTANT NOTICE TO ALL BUYERS</span>
+                      {/* Mandatory Inspection & Zero Post-Acceptance Liability Alert */}
+                      <div className="p-3 bg-rose-50 border-2 border-rose-300 rounded-xl space-y-1.5 text-xs text-rose-950">
+                        <div className="flex items-center gap-1.5 font-black text-rose-900 uppercase tracking-wide">
+                          <AlertTriangle className="w-4 h-4 text-rose-600 shrink-0" />
+                          Mandatory Inspection Clause Before Confirming
                         </div>
-                        <p className="text-[11px] leading-relaxed font-semibold">
-                          Every buyer must thoroughly inspect the ordered product, its physical condition, and the expiry date BEFORE confirming the delivery. Once you confirm the delivery, the payment is released, and the platform will not be able to offer any refunds, support, or help under any circumstances.
+                        <p className="text-rose-800 leading-relaxed font-medium">
+                          Please check the product's <strong>expiry date, manufacturer seal, and packaging integrity</strong> right now in front of the delivery partner. In accordance with platform Terms, <strong>once you confirm delivery, no subsequent complaints, refunds, or support requests regarding product expiry or condition will be entertained, and no help will be provided after that point.</strong>
                         </p>
                       </div>
 
